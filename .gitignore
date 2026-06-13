@@ -1,0 +1,33 @@
+# ESP-IDF build outputs
+build/
+sdkconfig.old
+
+# ESP-IDF managed dependency cache
+managed_components/
+
+# Local environment and caches
+.cache/
+.pytest_cache/
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Editor and OS files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Generated binaries and logs
+*.bin
+*.elf
+*.map
+*.hex
+*.log
+
+# Local secrets/config overrides
+*.local
+*.env
