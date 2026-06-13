@@ -15,14 +15,13 @@
 #include "nvs.h"
 #include "nvs_flash.h"
 
-void bt_av_hdl_stack_evt(uint16_t event, void *p_param __attribute__((unused)))
-{
+void bt_av_hdl_stack_evt(uint16_t event, void* p_param __attribute__((unused))) {
     bt_log_enter(__func__);
     ESP_LOGI(BT_AV_TAG, "%s event: %d", __func__, event);
 
     switch (event) {
     case BT_APP_STACK_UP_EVT: {
-        char *dev_name = LOCAL_DEVICE_NAME;
+        char* dev_name = LOCAL_DEVICE_NAME;
         esp_bt_gap_set_device_name(dev_name);
         esp_bt_gap_register_callback(bt_app_gap_cb);
 
@@ -55,8 +54,7 @@ void bt_av_hdl_stack_evt(uint16_t event, void *p_param __attribute__((unused)))
     bt_log_leave(__func__);
 }
 
-void init_bt_app(void)
-{
+void init_bt_app(void) {
     char bda_str[18] = {0};
     esp_err_t ret;
 
@@ -96,7 +94,7 @@ void init_bt_app(void)
     esp_bt_io_cap_t iocap = ESP_BT_IO_CAP_IO;
     esp_bt_gap_set_security_param(param_type, &iocap, sizeof(uint8_t));
 
-    ESP_LOGI(BT_AV_TAG, "Own address:[%s]", bt_bda2str((uint8_t *)esp_bt_dev_get_address(), bda_str, sizeof(bda_str)));
+    ESP_LOGI(BT_AV_TAG, "Own address:[%s]", bt_bda2str((uint8_t*)esp_bt_dev_get_address(), bda_str, sizeof(bda_str)));
     bt_app_task_start_up();
     bt_app_work_dispatch(bt_av_hdl_stack_evt, BT_APP_STACK_UP_EVT, NULL, 0, NULL);
 }

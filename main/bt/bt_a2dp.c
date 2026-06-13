@@ -12,26 +12,24 @@
 #include "esp_err.h"
 #include "esp_log.h"
 
-static bool check_pref_mcc_against_sink_caps(const esp_a2d_mcc_t *sink_caps, const esp_a2d_mcc_t *pref_mcc);
-static void bt_app_a2d_set_pref_mcc(esp_a2d_conn_hdl_t conn_hdl, const esp_a2d_mcc_t *sink_caps);
-static void bt_app_av_state_unconnected_hdlr(uint16_t event, void *param);
-static void bt_app_av_state_connecting_hdlr(uint16_t event, void *param);
-static void bt_app_av_state_connected_hdlr(uint16_t event, void *param);
-static void bt_app_av_state_disconnecting_hdlr(uint16_t event, void *param);
-static void bt_app_av_media_proc(uint16_t event, void *param);
+static bool check_pref_mcc_against_sink_caps(const esp_a2d_mcc_t* sink_caps, const esp_a2d_mcc_t* pref_mcc);
+static void bt_app_a2d_set_pref_mcc(esp_a2d_conn_hdl_t conn_hdl, const esp_a2d_mcc_t* sink_caps);
+static void bt_app_av_state_unconnected_hdlr(uint16_t event, void* param);
+static void bt_app_av_state_connecting_hdlr(uint16_t event, void* param);
+static void bt_app_av_state_connected_hdlr(uint16_t event, void* param);
+static void bt_app_av_state_disconnecting_hdlr(uint16_t event, void* param);
+static void bt_app_av_media_proc(uint16_t event, void* param);
 
-void bt_app_a2d_cb(esp_a2d_cb_event_t event, esp_a2d_cb_param_t *param)
-{
+void bt_app_a2d_cb(esp_a2d_cb_event_t event, esp_a2d_cb_param_t* param) {
     bt_app_work_dispatch(bt_app_av_sm_hdlr, event, param, sizeof(esp_a2d_cb_param_t), NULL);
 }
 
-int32_t bt_app_a2d_data_cb(uint8_t *data, int32_t len)
-{
+int32_t bt_app_a2d_data_cb(uint8_t* data, int32_t len) {
     if (data == NULL || len < 0) {
         return 0;
     }
 
-    int16_t *p_buf = (int16_t *)data;
+    int16_t* p_buf = (int16_t*)data;
     for (int i = 0; i < (len >> 1); i++) {
         p_buf[i] = 0;
     }
@@ -39,13 +37,11 @@ int32_t bt_app_a2d_data_cb(uint8_t *data, int32_t len)
     return len;
 }
 
-void bt_app_a2d_heart_beat(TimerHandle_t arg)
-{
+void bt_app_a2d_heart_beat(TimerHandle_t arg) {
     bt_app_work_dispatch(bt_app_av_sm_hdlr, BT_APP_HEART_BEAT_EVT, NULL, 0, NULL);
 }
 
-void bt_app_av_sm_hdlr(uint16_t event, void *param)
-{
+void bt_app_av_sm_hdlr(uint16_t event, void* param) {
     bt_log_enter(__func__);
     ESP_LOGI(BT_AV_TAG, "%s state: %d, event: 0x%x", __func__, s_a2d_state, event);
 
@@ -72,15 +68,13 @@ void bt_app_av_sm_hdlr(uint16_t event, void *param)
     bt_log_leave(__func__);
 }
 
-static bool is_one_bit_set_u8(uint8_t v)
-{
+static bool is_one_bit_set_u8(uint8_t v) {
     return (v != 0) && ((v & (uint8_t)(v - 1)) == 0);
 }
 
-static bool check_pref_mcc_against_sink_caps(const esp_a2d_mcc_t *sink_caps, const esp_a2d_mcc_t *pref_mcc)
-{
-    const esp_a2d_cie_sbc_t *caps;
-    const esp_a2d_cie_sbc_t *cfg;
+static bool check_pref_mcc_against_sink_caps(const esp_a2d_mcc_t* sink_caps, const esp_a2d_mcc_t* pref_mcc) {
+    const esp_a2d_cie_sbc_t* caps;
+    const esp_a2d_cie_sbc_t* cfg;
 
     if (sink_caps == NULL || pref_mcc == NULL) {
         return false;
@@ -111,15 +105,14 @@ static bool check_pref_mcc_against_sink_caps(const esp_a2d_mcc_t *sink_caps, con
         return false;
     }
     if (cfg->min_bitpool < caps->min_bitpool || cfg->max_bitpool > caps->max_bitpool ||
-            cfg->min_bitpool > cfg->max_bitpool) {
+        cfg->min_bitpool > cfg->max_bitpool) {
         return false;
     }
 
     return true;
 }
 
-static void bt_app_a2d_set_pref_mcc(esp_a2d_conn_hdl_t conn_hdl, const esp_a2d_mcc_t *sink_caps)
-{
+static void bt_app_a2d_set_pref_mcc(esp_a2d_conn_hdl_t conn_hdl, const esp_a2d_mcc_t* sink_caps) {
     bt_log_enter(__func__);
     esp_a2d_mcc_t pref_mcc;
 
@@ -143,10 +136,9 @@ static void bt_app_a2d_set_pref_mcc(esp_a2d_conn_hdl_t conn_hdl, const esp_a2d_m
     bt_log_leave(__func__);
 }
 
-static void bt_app_av_state_unconnected_hdlr(uint16_t event, void *param)
-{
+static void bt_app_av_state_unconnected_hdlr(uint16_t event, void* param) {
     bt_log_enter(__func__);
-    esp_a2d_cb_param_t *a2d = NULL;
+    esp_a2d_cb_param_t* a2d = NULL;
 
     switch (event) {
     case ESP_A2D_CONNECTION_STATE_EVT:
@@ -155,18 +147,17 @@ static void bt_app_av_state_unconnected_hdlr(uint16_t event, void *param)
     case ESP_A2D_MEDIA_CTRL_ACK_EVT:
         break;
     case BT_APP_HEART_BEAT_EVT: {
-        uint8_t *bda = s_peer_bda;
-        ESP_LOGI(BT_AV_TAG, "a2dp connecting to peer: %02x:%02x:%02x:%02x:%02x:%02x",
-                 bda[0], bda[1], bda[2], bda[3], bda[4], bda[5]);
+        uint8_t* bda = s_peer_bda;
+        ESP_LOGI(BT_AV_TAG, "a2dp connecting to peer: %02x:%02x:%02x:%02x:%02x:%02x", bda[0], bda[1], bda[2], bda[3],
+                 bda[4], bda[5]);
         esp_a2d_source_connect(s_peer_bda);
         s_a2d_state = APP_AV_STATE_CONNECTING;
         s_connecting_intv = 0;
         break;
     }
     case ESP_A2D_REPORT_SNK_DELAY_VALUE_EVT:
-        a2d = (esp_a2d_cb_param_t *)(param);
-        ESP_LOGI(BT_AV_TAG, "%s, delay value: %u * 1/10 ms", __func__,
-                 a2d->a2d_report_delay_value_stat.delay_value);
+        a2d = (esp_a2d_cb_param_t*)(param);
+        ESP_LOGI(BT_AV_TAG, "%s, delay value: %u * 1/10 ms", __func__, a2d->a2d_report_delay_value_stat.delay_value);
         break;
     default:
         ESP_LOGE(BT_AV_TAG, "%s unhandled event: %d", __func__, event);
@@ -175,14 +166,13 @@ static void bt_app_av_state_unconnected_hdlr(uint16_t event, void *param)
     bt_log_leave(__func__);
 }
 
-static void bt_app_av_state_connecting_hdlr(uint16_t event, void *param)
-{
+static void bt_app_av_state_connecting_hdlr(uint16_t event, void* param) {
     bt_log_enter(__func__);
-    esp_a2d_cb_param_t *a2d = NULL;
+    esp_a2d_cb_param_t* a2d = NULL;
 
     switch (event) {
     case ESP_A2D_CONNECTION_STATE_EVT:
-        a2d = (esp_a2d_cb_param_t *)(param);
+        a2d = (esp_a2d_cb_param_t*)(param);
         if (a2d->conn_stat.state == ESP_A2D_CONNECTION_STATE_CONNECTED) {
             ESP_LOGI(BT_AV_TAG, "a2dp connected");
             s_a2d_state = APP_AV_STATE_CONNECTED;
@@ -202,9 +192,8 @@ static void bt_app_av_state_connecting_hdlr(uint16_t event, void *param)
         }
         break;
     case ESP_A2D_REPORT_SNK_DELAY_VALUE_EVT:
-        a2d = (esp_a2d_cb_param_t *)(param);
-        ESP_LOGI(BT_AV_TAG, "%s, delay value: %u * 1/10 ms", __func__,
-                 a2d->a2d_report_delay_value_stat.delay_value);
+        a2d = (esp_a2d_cb_param_t*)(param);
+        ESP_LOGI(BT_AV_TAG, "%s, delay value: %u * 1/10 ms", __func__, a2d->a2d_report_delay_value_stat.delay_value);
         break;
     default:
         ESP_LOGE(BT_AV_TAG, "%s unhandled event: %d", __func__, event);
@@ -213,10 +202,9 @@ static void bt_app_av_state_connecting_hdlr(uint16_t event, void *param)
     bt_log_leave(__func__);
 }
 
-static void bt_app_av_media_proc(uint16_t event, void *param)
-{
+static void bt_app_av_media_proc(uint16_t event, void* param) {
     bt_log_enter(__func__);
-    esp_a2d_cb_param_t *a2d = NULL;
+    esp_a2d_cb_param_t* a2d = NULL;
 
     switch (s_media_state) {
     case APP_AV_MEDIA_STATE_IDLE:
@@ -224,9 +212,9 @@ static void bt_app_av_media_proc(uint16_t event, void *param)
             ESP_LOGI(BT_AV_TAG, "a2dp media ready checking ...");
             esp_a2d_media_ctrl(ESP_A2D_MEDIA_CTRL_CHECK_SRC_RDY);
         } else if (event == ESP_A2D_MEDIA_CTRL_ACK_EVT) {
-            a2d = (esp_a2d_cb_param_t *)(param);
+            a2d = (esp_a2d_cb_param_t*)(param);
             if (a2d->media_ctrl_stat.cmd == ESP_A2D_MEDIA_CTRL_CHECK_SRC_RDY &&
-                    a2d->media_ctrl_stat.status == ESP_A2D_MEDIA_CTRL_ACK_SUCCESS) {
+                a2d->media_ctrl_stat.status == ESP_A2D_MEDIA_CTRL_ACK_SUCCESS) {
                 ESP_LOGI(BT_AV_TAG, "a2dp media ready, starting ...");
                 esp_a2d_media_ctrl(ESP_A2D_MEDIA_CTRL_START);
                 s_media_state = APP_AV_MEDIA_STATE_STARTING;
@@ -235,9 +223,9 @@ static void bt_app_av_media_proc(uint16_t event, void *param)
         break;
     case APP_AV_MEDIA_STATE_STARTING:
         if (event == ESP_A2D_MEDIA_CTRL_ACK_EVT) {
-            a2d = (esp_a2d_cb_param_t *)(param);
+            a2d = (esp_a2d_cb_param_t*)(param);
             if (a2d->media_ctrl_stat.cmd == ESP_A2D_MEDIA_CTRL_START &&
-                    a2d->media_ctrl_stat.status == ESP_A2D_MEDIA_CTRL_ACK_SUCCESS) {
+                a2d->media_ctrl_stat.status == ESP_A2D_MEDIA_CTRL_ACK_SUCCESS) {
                 ESP_LOGI(BT_AV_TAG, "a2dp media start successfully.");
                 s_intv_cnt = 0;
                 s_media_state = APP_AV_MEDIA_STATE_STARTED;
@@ -259,9 +247,9 @@ static void bt_app_av_media_proc(uint16_t event, void *param)
         break;
     case APP_AV_MEDIA_STATE_STOPPING:
         if (event == ESP_A2D_MEDIA_CTRL_ACK_EVT) {
-            a2d = (esp_a2d_cb_param_t *)(param);
+            a2d = (esp_a2d_cb_param_t*)(param);
             if (a2d->media_ctrl_stat.cmd == ESP_A2D_MEDIA_CTRL_SUSPEND &&
-                    a2d->media_ctrl_stat.status == ESP_A2D_MEDIA_CTRL_ACK_SUCCESS) {
+                a2d->media_ctrl_stat.status == ESP_A2D_MEDIA_CTRL_ACK_SUCCESS) {
                 ESP_LOGI(BT_AV_TAG, "a2dp media suspend successfully, disconnecting...");
                 s_media_state = APP_AV_MEDIA_STATE_IDLE;
                 esp_a2d_source_disconnect(s_peer_bda);
@@ -278,20 +266,19 @@ static void bt_app_av_media_proc(uint16_t event, void *param)
     bt_log_leave(__func__);
 }
 
-static void bt_app_av_state_connected_hdlr(uint16_t event, void *param)
-{
-    esp_a2d_cb_param_t *a2d = NULL;
+static void bt_app_av_state_connected_hdlr(uint16_t event, void* param) {
+    esp_a2d_cb_param_t* a2d = NULL;
 
     switch (event) {
     case ESP_A2D_CONNECTION_STATE_EVT:
-        a2d = (esp_a2d_cb_param_t *)(param);
+        a2d = (esp_a2d_cb_param_t*)(param);
         if (a2d->conn_stat.state == ESP_A2D_CONNECTION_STATE_DISCONNECTED) {
             ESP_LOGI(BT_AV_TAG, "a2dp disconnected");
             s_a2d_state = APP_AV_STATE_UNCONNECTED;
         }
         break;
     case ESP_A2D_AUDIO_STATE_EVT:
-        a2d = (esp_a2d_cb_param_t *)(param);
+        a2d = (esp_a2d_cb_param_t*)(param);
         if (ESP_A2D_AUDIO_STATE_STARTED == a2d->audio_stat.state) {
             s_pkt_cnt = 0;
         }
@@ -303,29 +290,24 @@ static void bt_app_av_state_connected_hdlr(uint16_t event, void *param)
         bt_app_av_media_proc(event, param);
         break;
     case ESP_A2D_REPORT_SNK_DELAY_VALUE_EVT:
-        a2d = (esp_a2d_cb_param_t *)(param);
-        ESP_LOGI(BT_AV_TAG, "%s, delay value: %u * 1/10 ms", __func__,
-                 a2d->a2d_report_delay_value_stat.delay_value);
+        a2d = (esp_a2d_cb_param_t*)(param);
+        ESP_LOGI(BT_AV_TAG, "%s, delay value: %u * 1/10 ms", __func__, a2d->a2d_report_delay_value_stat.delay_value);
         break;
     case ESP_A2D_REPORT_SNK_CODEC_CAPS_EVT: {
-        a2d = (esp_a2d_cb_param_t *)(param);
-        esp_a2d_mcc_t *sink_mcc = &a2d->a2d_report_snk_codec_caps_stat.mcc;
+        a2d = (esp_a2d_cb_param_t*)(param);
+        esp_a2d_mcc_t* sink_mcc = &a2d->a2d_report_snk_codec_caps_stat.mcc;
         ESP_LOGI(BT_AV_TAG, "sink codec type: %d", sink_mcc->type);
         if (sink_mcc->type == ESP_A2D_MCT_SBC) {
             ESP_LOGI(BT_AV_TAG, "sink codec capabilities: 0x%x-0x%x-0x%x-0x%x-0x%x-%d-%d",
-                     sink_mcc->cie.sbc_info.samp_freq,
-                     sink_mcc->cie.sbc_info.ch_mode,
-                     sink_mcc->cie.sbc_info.block_len,
-                     sink_mcc->cie.sbc_info.num_subbands,
-                     sink_mcc->cie.sbc_info.alloc_mthd,
-                     sink_mcc->cie.sbc_info.min_bitpool,
-                     sink_mcc->cie.sbc_info.max_bitpool);
+                     sink_mcc->cie.sbc_info.samp_freq, sink_mcc->cie.sbc_info.ch_mode, sink_mcc->cie.sbc_info.block_len,
+                     sink_mcc->cie.sbc_info.num_subbands, sink_mcc->cie.sbc_info.alloc_mthd,
+                     sink_mcc->cie.sbc_info.min_bitpool, sink_mcc->cie.sbc_info.max_bitpool);
         }
         bt_app_a2d_set_pref_mcc(a2d->a2d_report_snk_codec_caps_stat.conn_hdl, sink_mcc);
         break;
     }
     case ESP_A2D_SRC_SET_PREF_MCC_EVT:
-        a2d = (esp_a2d_cb_param_t *)(param);
+        a2d = (esp_a2d_cb_param_t*)(param);
         ESP_LOGI(BT_AV_TAG, "Set preferred media codec config result: conn_hdl: %d, set_status: %d",
                  a2d->a2d_set_pref_mcc_stat.conn_hdl, a2d->a2d_set_pref_mcc_stat.set_status);
         break;
@@ -335,13 +317,12 @@ static void bt_app_av_state_connected_hdlr(uint16_t event, void *param)
     }
 }
 
-static void bt_app_av_state_disconnecting_hdlr(uint16_t event, void *param)
-{
-    esp_a2d_cb_param_t *a2d = NULL;
+static void bt_app_av_state_disconnecting_hdlr(uint16_t event, void* param) {
+    esp_a2d_cb_param_t* a2d = NULL;
 
     switch (event) {
     case ESP_A2D_CONNECTION_STATE_EVT:
-        a2d = (esp_a2d_cb_param_t *)(param);
+        a2d = (esp_a2d_cb_param_t*)(param);
         if (a2d->conn_stat.state == ESP_A2D_CONNECTION_STATE_DISCONNECTED) {
             ESP_LOGI(BT_AV_TAG, "a2dp disconnected");
             s_a2d_state = APP_AV_STATE_UNCONNECTED;
@@ -353,9 +334,8 @@ static void bt_app_av_state_disconnecting_hdlr(uint16_t event, void *param)
     case BT_APP_HEART_BEAT_EVT:
         break;
     case ESP_A2D_REPORT_SNK_DELAY_VALUE_EVT:
-        a2d = (esp_a2d_cb_param_t *)(param);
-        ESP_LOGI(BT_AV_TAG, "%s, delay value: 0x%u * 1/10 ms", __func__,
-                 a2d->a2d_report_delay_value_stat.delay_value);
+        a2d = (esp_a2d_cb_param_t*)(param);
+        ESP_LOGI(BT_AV_TAG, "%s, delay value: 0x%u * 1/10 ms", __func__, a2d->a2d_report_delay_value_stat.delay_value);
         break;
     default:
         ESP_LOGE(BT_AV_TAG, "%s unhandled event: %d", __func__, event);

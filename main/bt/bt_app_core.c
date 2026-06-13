@@ -14,15 +14,14 @@
 #include "freertos/queue.h"
 #include "freertos/task.h"
 
-static void bt_app_task_handler(void *arg);
-static bool bt_app_send_msg(bt_app_msg_t *msg);
-static void bt_app_work_dispatched(bt_app_msg_t *msg);
+static void bt_app_task_handler(void* arg);
+static bool bt_app_send_msg(bt_app_msg_t* msg);
+static void bt_app_work_dispatched(bt_app_msg_t* msg);
 
 static QueueHandle_t s_bt_app_task_queue = NULL;
 static TaskHandle_t s_bt_app_task_handle = NULL;
 
-static bool bt_app_send_msg(bt_app_msg_t *msg)
-{
+static bool bt_app_send_msg(bt_app_msg_t* msg) {
     if (msg == NULL) {
         return false;
     }
@@ -36,15 +35,13 @@ static bool bt_app_send_msg(bt_app_msg_t *msg)
     return true;
 }
 
-static void bt_app_work_dispatched(bt_app_msg_t *msg)
-{
+static void bt_app_work_dispatched(bt_app_msg_t* msg) {
     if (msg->cb) {
         msg->cb(msg->event, msg->param);
     }
 }
 
-static void bt_app_task_handler(void *arg)
-{
+static void bt_app_task_handler(void* arg) {
     bt_app_msg_t msg;
 
     for (;;) {
@@ -67,9 +64,8 @@ static void bt_app_task_handler(void *arg)
     }
 }
 
-bool bt_app_work_dispatch(bt_app_cb_t p_cback, uint16_t event, void *p_params, int param_len,
-                          bt_app_copy_cb_t p_copy_cback)
-{
+bool bt_app_work_dispatch(bt_app_cb_t p_cback, uint16_t event, void* p_params, int param_len,
+                          bt_app_copy_cb_t p_copy_cback) {
     ESP_LOGD(BT_APP_CORE_TAG, "%s event: 0x%x, param len: %d", __func__, event, param_len);
 
     bt_app_msg_t msg;
@@ -94,14 +90,12 @@ bool bt_app_work_dispatch(bt_app_cb_t p_cback, uint16_t event, void *p_params, i
     return false;
 }
 
-void bt_app_task_start_up(void)
-{
+void bt_app_task_start_up(void) {
     s_bt_app_task_queue = xQueueCreate(10, sizeof(bt_app_msg_t));
     xTaskCreate(bt_app_task_handler, "BtAppTask", 3072, NULL, 10, &s_bt_app_task_handle);
 }
 
-void bt_app_task_shut_down(void)
-{
+void bt_app_task_shut_down(void) {
     if (s_bt_app_task_handle) {
         vTaskDelete(s_bt_app_task_handle);
         s_bt_app_task_handle = NULL;

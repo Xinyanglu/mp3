@@ -12,11 +12,10 @@
 #include "bt_app_core.h"
 #include "esp_log.h"
 
-static void bt_av_hdl_avrc_ct_evt(uint16_t event, void *p_param);
-static void bt_av_notify_evt_handler(uint8_t event_id, esp_avrc_rn_param_t *event_parameter);
+static void bt_av_hdl_avrc_ct_evt(uint16_t event, void* p_param);
+static void bt_av_notify_evt_handler(uint8_t event_id, esp_avrc_rn_param_t* event_parameter);
 
-void bt_app_rc_ct_cb(esp_avrc_ct_cb_event_t event, esp_avrc_ct_cb_param_t *param)
-{
+void bt_app_rc_ct_cb(esp_avrc_ct_cb_event_t event, esp_avrc_ct_cb_param_t* param) {
     switch (event) {
     case ESP_AVRC_CT_CONNECTION_STATE_EVT:
     case ESP_AVRC_CT_PASSTHROUGH_RSP_EVT:
@@ -34,16 +33,13 @@ void bt_app_rc_ct_cb(esp_avrc_ct_cb_event_t event, esp_avrc_ct_cb_param_t *param
     }
 }
 
-static void bt_av_volume_changed(void)
-{
-    if (esp_avrc_rn_evt_bit_mask_operation(ESP_AVRC_BIT_MASK_OP_TEST, &s_avrc_peer_rn_cap,
-                                           ESP_AVRC_RN_VOLUME_CHANGE)) {
+static void bt_av_volume_changed(void) {
+    if (esp_avrc_rn_evt_bit_mask_operation(ESP_AVRC_BIT_MASK_OP_TEST, &s_avrc_peer_rn_cap, ESP_AVRC_RN_VOLUME_CHANGE)) {
         esp_avrc_ct_send_register_notification_cmd(APP_RC_CT_TL_RN_VOLUME_CHANGE, ESP_AVRC_RN_VOLUME_CHANGE, 0);
     }
 }
 
-static void bt_av_notify_evt_handler(uint8_t event_id, esp_avrc_rn_param_t *event_parameter)
-{
+static void bt_av_notify_evt_handler(uint8_t event_id, esp_avrc_rn_param_t* event_parameter) {
     switch (event_id) {
     case ESP_AVRC_RN_VOLUME_CHANGE:
         ESP_LOGI(BT_RC_CT_TAG, "Volume changed: %d", event_parameter->volume);
@@ -56,14 +52,13 @@ static void bt_av_notify_evt_handler(uint8_t event_id, esp_avrc_rn_param_t *even
     }
 }
 
-static void bt_av_hdl_avrc_ct_evt(uint16_t event, void *p_param)
-{
+static void bt_av_hdl_avrc_ct_evt(uint16_t event, void* p_param) {
     ESP_LOGI(BT_RC_CT_TAG, "%s evt %d", __func__, event);
-    esp_avrc_ct_cb_param_t *rc = (esp_avrc_ct_cb_param_t *)(p_param);
+    esp_avrc_ct_cb_param_t* rc = (esp_avrc_ct_cb_param_t*)(p_param);
 
     switch (event) {
     case ESP_AVRC_CT_CONNECTION_STATE_EVT: {
-        uint8_t *bda = rc->conn_stat.remote_bda;
+        uint8_t* bda = rc->conn_stat.remote_bda;
         ESP_LOGI(BT_RC_CT_TAG, "AVRC conn_state event: state %d, [%02x:%02x:%02x:%02x:%02x:%02x]",
                  rc->conn_stat.connected, bda[0], bda[1], bda[2], bda[3], bda[4], bda[5]);
 
@@ -79,8 +74,8 @@ static void bt_av_hdl_avrc_ct_evt(uint16_t event, void *p_param)
                  rc->psth_rsp.key_code, rc->psth_rsp.key_state, rc->psth_rsp.rsp_code);
         break;
     case ESP_AVRC_CT_METADATA_RSP_EVT:
-        ESP_LOGI(BT_RC_CT_TAG, "AVRC metadata response: attribute id 0x%x, %s",
-                 rc->meta_rsp.attr_id, rc->meta_rsp.attr_text);
+        ESP_LOGI(BT_RC_CT_TAG, "AVRC metadata response: attribute id 0x%x, %s", rc->meta_rsp.attr_id,
+                 rc->meta_rsp.attr_text);
         free(rc->meta_rsp.attr_text);
         break;
     case ESP_AVRC_CT_CHANGE_NOTIFY_EVT:
@@ -88,8 +83,8 @@ static void bt_av_hdl_avrc_ct_evt(uint16_t event, void *p_param)
         bt_av_notify_evt_handler(rc->change_ntf.event_id, &rc->change_ntf.event_parameter);
         break;
     case ESP_AVRC_CT_REMOTE_FEATURES_EVT:
-        ESP_LOGI(BT_RC_CT_TAG, "AVRC remote features %" PRIx32 ", TG features %x",
-                 rc->rmt_feats.feat_mask, rc->rmt_feats.tg_feat_flag);
+        ESP_LOGI(BT_RC_CT_TAG, "AVRC remote features %" PRIx32 ", TG features %x", rc->rmt_feats.feat_mask,
+                 rc->rmt_feats.tg_feat_flag);
         break;
     case ESP_AVRC_CT_GET_RN_CAPABILITIES_RSP_EVT:
         ESP_LOGI(BT_RC_CT_TAG, "remote rn_cap: count %d, bitmask 0x%x", rc->get_rn_caps_rsp.cap_count,
