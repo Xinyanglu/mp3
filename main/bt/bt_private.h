@@ -55,7 +55,6 @@ extern int s_connecting_intv;
 extern uint32_t s_pkt_cnt;
 extern esp_avrc_rn_evt_cap_mask_t s_avrc_peer_rn_cap;
 extern TimerHandle_t s_heartbeat_timer;
-extern const char remote_device_name[];
 
 char* bt_bda2str(esp_bd_addr_t bda, char* str, size_t size);
 void bt_log_enter(const char* func);
