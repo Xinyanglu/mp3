@@ -7,7 +7,7 @@ static const char* TAG = "main";
 
 void app_main(void) {
     ESP_ERROR_CHECK(screen_init());
-    screen_show_bt_scan();
+    screen_notify_bt_refresh(NULL);
     init_bt_app();
 
     ESP_LOGI(TAG, "LVGL hello world ready");

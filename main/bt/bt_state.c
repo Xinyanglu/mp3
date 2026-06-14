@@ -15,4 +15,3 @@ int s_connecting_intv = 0;
 uint32_t s_pkt_cnt = 0;
 esp_avrc_rn_evt_cap_mask_t s_avrc_peer_rn_cap;
 TimerHandle_t s_heartbeat_timer;
-const char remote_device_name[] = "BluePRISM";

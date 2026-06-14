@@ -5,6 +5,7 @@
 
 #include "driver/gpio.h"
 #include "driver/spi_master.h"
+#include "esp_bt_defs.h"
 #include "esp_check.h"
 #include "esp_lcd_panel_io.h"
 #include "esp_lcd_panel_ops.h"
@@ -12,6 +13,9 @@
 #include "esp_log.h"
 #include "esp_lvgl_port.h"
 #include "esp_timer.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/queue.h"
+#include "freertos/task.h"
 
 #define LCD_HOST SPI2_HOST
 
@@ -35,14 +39,15 @@
 #define PIN_NUM_BK_LIGHT GPIO_NUM_13
 
 #define MAX_BT_DEVICE_NUM 16
-#define MAX_BT_DEVICE_TIMEOUT_MS 30000
-
-#define MAX_DEVICE_NAME_LEN 64
+#define MAX_BT_DEVICE_TIMEOUT_MS 10000
 
 typedef struct {
     char name[MAX_DEVICE_NAME_LEN];
+    esp_bd_addr_t bda;
     int64_t last_discovered_ms;
 } screen_bt_device_t;
+
+typedef enum { SCREEN_STATE_BT_DISCOVERY } screen_state_e;
 
 static const char* TAG = "screen";
 
@@ -51,6 +56,19 @@ static esp_lcd_panel_handle_t lcd_panel;
 static lv_display_t* display;
 static screen_bt_device_t bt_devices[MAX_BT_DEVICE_NUM];
 static uint8_t num_bt_devices;
+static esp_timer_handle_t bt_scan_refresh_timer;
+static screen_state_e current_screen = SCREEN_STATE_BT_DISCOVERY;
+
+static esp_err_t init_lcd(void);
+static esp_err_t init_lvgl(void);
+static void add_bt_device(const char* name, esp_bd_addr_t bda);
+static int find_bt_device(esp_bd_addr_t bda);
+static void screen_refresh_bt_scan(void* arg);
+static void screen_show_bt_scan(void);
+static esp_err_t screen_add_bt_device(const char* name, esp_bd_addr_t bda);
+
+static QueueHandle_t screen_event_queue = NULL;
+static TaskHandle_t screen_task_handle = NULL;
 
 static esp_err_t init_lcd(void) {
     const gpio_config_t bk_gpio_config = {
@@ -133,14 +151,62 @@ static esp_err_t init_lvgl(void) {
     return ESP_OK;
 }
 
+static void screen_task_handler(void* arg __attribute__((unused))) {
+    screen_msg msg;
+    while (1) {
+        if (pdTRUE == xQueueReceive(screen_event_queue, &msg, (TickType_t)portMAX_DELAY)) {
+            ESP_LOGD(TAG, "%s, event: 0x%x", __func__, msg.event);
+
+            switch (msg.event) {
+            case SCREEN_EVT_REFRESH_BT_SCAN:
+                screen_refresh_bt_scan(NULL);
+                break;
+            case SCREEN_EVT_BT_DEVICE_FOUND:
+                screen_add_bt_device(msg.device_name, msg.bda);
+                break;
+            default:
+                ESP_LOGW(TAG, "%s, unhandled event: %d", __func__, msg.event);
+                break;
+            }
+        }
+    }
+}
+
 esp_err_t screen_init(void) {
     ESP_RETURN_ON_ERROR(init_lcd(), TAG, "LCD init failed");
     ESP_RETURN_ON_ERROR(init_lvgl(), TAG, "LVGL setup failed");
 
+    screen_event_queue = xQueueCreate(10, sizeof(screen_msg));
+    xTaskCreate(screen_task_handler, "ScreenTask", 3072, NULL, 10, &screen_task_handle);
+
+    const esp_timer_create_args_t timer_args = {
+        .callback = screen_notify_bt_refresh,
+        .name = "bt_scan_refresh",
+    };
+
+    ESP_RETURN_ON_ERROR(esp_timer_create(&timer_args, &bt_scan_refresh_timer), TAG,
+                        "BT scan refresh timer create failed");
+
+    ESP_RETURN_ON_ERROR(esp_timer_start_periodic(bt_scan_refresh_timer, 5 * 1000 * 1000), TAG,
+                        "BT scan refresh timer start failed");
+
     return ESP_OK;
 }
 
-void screen_remove_old_bt_devices(void) {
+void screen_notify_bt_device_found(const char* device_name, esp_bd_addr_t bda) {
+    screen_msg msg = {.event = SCREEN_EVT_BT_DEVICE_FOUND};
+    strncpy(msg.device_name, device_name, MAX_DEVICE_NAME_LEN);
+    memcpy(msg.bda, bda, sizeof(esp_bd_addr_t));
+    xQueueSend(screen_event_queue, &msg, 0);
+}
+
+void screen_notify_bt_refresh(void* arg) {
+    (void)arg;
+    screen_msg msg = {.event = SCREEN_EVT_REFRESH_BT_SCAN, .device_name = "\0"};
+    xQueueSend(screen_event_queue, &msg, 0);
+}
+
+static void screen_remove_old_bt_devices(void) {
     int64_t now = esp_timer_get_time() / 1000;
     for (int i = 0; i < MAX_BT_DEVICE_NUM; i++) {
         if (bt_devices[i].name[0] == '\0')
@@ -152,10 +218,11 @@ void screen_remove_old_bt_devices(void) {
     }
 }
 
-static void add_bt_device(const char* name) {
+static void add_bt_device(const char* name, esp_bd_addr_t bda) {
     for (int i = 0; i < MAX_BT_DEVICE_NUM; i++) {
         if (bt_devices[i].name[0] == '\0') {
             strncpy(bt_devices[i].name, name, MAX_DEVICE_NAME_LEN);
+            memcpy(bt_devices[i].bda, bda, sizeof(bt_devices[i].bda));
             bt_devices[i].last_discovered_ms = esp_timer_get_time() / 1000;
             num_bt_devices++;
             break;
@@ -163,32 +230,45 @@ static void add_bt_device(const char* name) {
     }
 }
 
-static int find_bt_device(const char* name) {
+static int find_bt_device(esp_bd_addr_t bda) {
     for (int i = 0; i < MAX_BT_DEVICE_NUM; i++) {
-        if (strncmp(bt_devices[i].name, name, MAX_DEVICE_NAME_LEN) == 0)
+        if (bt_devices[i].name[0] == '\0') {
+            continue;
+        }
+        if (memcmp(bt_devices[i].bda, bda, ESP_BD_ADDR_LEN) == 0)
             return i;
     }
     return -1;
 }
 
-esp_err_t screen_add_bt_device(const char* name) {
-    if (name == NULL) 
+static void screen_refresh_bt_scan(void* arg) {
+    (void)arg;
+    screen_remove_old_bt_devices();
+    screen_show_bt_scan();
+}
+
+static esp_err_t screen_add_bt_device(const char* name, esp_bd_addr_t bda) {
+    screen_remove_old_bt_devices();
+    if (name == NULL)
         return ESP_ERR_INVALID_ARG;
-    
+
     if (name[0] == '\0' || strnlen(name, MAX_DEVICE_NAME_LEN) >= MAX_DEVICE_NAME_LEN) {
         ESP_LOGE(TAG, "Device name too long");
         return ESP_ERR_INVALID_SIZE;
     }
-    int idx = find_bt_device(name);
+    int idx = find_bt_device(bda);
     if (idx >= 0)
         bt_devices[idx].last_discovered_ms = esp_timer_get_time() / 1000;
     else if (num_bt_devices < MAX_BT_DEVICE_NUM)
-        add_bt_device(name);
-    
+        add_bt_device(name, bda);
+
     return ESP_OK;
 }
 
-void screen_show_bt_scan(void) {
+static void screen_show_bt_scan(void) {
+    if (current_screen != SCREEN_STATE_BT_DISCOVERY) {
+        return;
+    }
     if (lvgl_port_lock(0)) {
         lv_obj_t* screen = lv_screen_active();
         lv_obj_clean(screen);
@@ -211,10 +291,12 @@ void screen_show_bt_scan(void) {
             lv_obj_t* device_label = lv_label_create(screen);
             lv_obj_set_width(device_label, LCD_H_RES - 24);
             lv_label_set_long_mode(device_label, LV_LABEL_LONG_WRAP);
-            lv_label_set_text(device_label, bt_devices[i].name);
+            lv_label_set_text_fmt(device_label, "%s\n%02X:%02X:%02X:%02X:%02X:%02X", bt_devices[i].name,
+                                  bt_devices[i].bda[0], bt_devices[i].bda[1], bt_devices[i].bda[2], bt_devices[i].bda[3],
+                                  bt_devices[i].bda[4], bt_devices[i].bda[5]);
             lv_obj_set_style_text_color(device_label, lv_color_hex(0x202020), LV_PART_MAIN);
             lv_obj_align(device_label, LV_ALIGN_TOP_LEFT, 12, y);
-            y += 22;
+            y += 44;
         }
 
         if (!found_device) {
@@ -223,21 +305,6 @@ void screen_show_bt_scan(void) {
             lv_obj_set_style_text_color(status, lv_color_hex(0x666666), LV_PART_MAIN);
             lv_obj_align(status, LV_ALIGN_TOP_LEFT, 12, y);
         }
-
-        lvgl_port_unlock();
-    }
-}
-
-void screen_show_hello_world(void) {
-    if (lvgl_port_lock(0)) {
-        lv_obj_t* screen = lv_screen_active();
-        lv_obj_set_style_bg_color(screen, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
-        lv_obj_set_style_bg_opa(screen, LV_OPA_COVER, LV_PART_MAIN);
-
-        lv_obj_t* label = lv_label_create(screen);
-        lv_label_set_text(label, "Hello world!!");
-        lv_obj_set_style_text_color(label, lv_color_hex(0xF2AA4C), LV_PART_MAIN);
-        lv_obj_center(label);
 
         lvgl_port_unlock();
     }

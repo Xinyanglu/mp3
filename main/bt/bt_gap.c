@@ -80,8 +80,8 @@ static void filter_inquiry_scan_result(esp_bt_gap_cb_param_t* param) {
     if (eir) {
         get_name_from_eir(eir, s_peer_bdname, NULL);
         ESP_LOGI(BT_AV_TAG, "Found device name: %s", s_peer_bdname);
-        screen_add_bt_device(s_peer_bdname);
-        screen_show_bt_scan();
+        screen_notify_bt_device_found(s_peer_bdname, param->disc_res.bda);
+        screen_notify_bt_refresh(NULL);
     }
 }
 
