@@ -37,7 +37,6 @@ void bt_av_hdl_stack_evt(uint16_t event, void* p_param __attribute__((unused))) 
         esp_a2d_source_register_data_callback(bt_app_a2d_data_cb);
 
         esp_bt_gap_set_scan_mode(ESP_BT_NON_CONNECTABLE, ESP_BT_NON_DISCOVERABLE);
-        esp_bt_gap_get_device_name();
 
         ESP_LOGI(BT_AV_TAG, "Starting device discovery...");
         s_a2d_state = APP_AV_STATE_DISCOVERING;

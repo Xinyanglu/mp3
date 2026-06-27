@@ -7,4 +7,6 @@
  */
 #pragma once
 
+#include <esp_bt_defs.h>
 void init_bt_app(void);
+void bt_app_connect_to(const char* name, esp_bd_addr_t bda);

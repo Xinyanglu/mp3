@@ -61,6 +61,7 @@ void bt_log_enter(const char* func);
 void bt_log_leave(const char* func);
 
 void bt_app_gap_cb(esp_bt_gap_cb_event_t event, esp_bt_gap_cb_param_t* param);
+void bt_app_gap_sm_hdlr(uint16_t event, void* param);
 void bt_app_a2d_cb(esp_a2d_cb_event_t event, esp_a2d_cb_param_t* param);
 int32_t bt_app_a2d_data_cb(uint8_t* data, int32_t len);
 void bt_app_a2d_heart_beat(TimerHandle_t arg);

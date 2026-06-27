@@ -3,6 +3,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "bt_app.h"
 #include "driver/gpio.h"
 #include "driver/spi_master.h"
 #include "esp_bt_defs.h"
@@ -68,6 +69,7 @@ static void screen_refresh_bt_scan(void* arg);
 static void screen_show_bt_scan(void);
 static esp_err_t screen_add_bt_device(const char* name, esp_bd_addr_t bda);
 static esp_err_t screen_handle_btn_press(screen_button button);
+static const char* screen_button_to_str(screen_button button);
 static int find_first_bt_device(void);
 static int find_next_bt_device(int start_idx);
 static int find_prev_bt_device(int start_idx);
@@ -168,6 +170,7 @@ static void screen_task_handler(void* arg __attribute__((unused))) {
                 break;
 
             case SCREEN_EVT_BTN_PRESS:
+                ESP_LOGI(TAG, "Button press: %s (%d)", screen_button_to_str(msg.button), msg.button);
                 screen_handle_btn_press(msg.button);
                 break;
 
@@ -201,6 +204,22 @@ esp_err_t screen_init(void) {
                         "BT scan refresh timer start failed");
 
     return ESP_OK;
+}
+
+static const char* screen_button_to_str(screen_button button) {
+    static const char* const button_names[] = {
+        [SCREEN_BTN_UP] = "SCREEN_BTN_UP",
+        [SCREEN_BTN_DOWN] = "SCREEN_BTN_DOWN",
+        [SCREEN_BTN_LEFT] = "SCREEN_BTN_LEFT",
+        [SCREEN_BTN_RIGHT] = "SCREEN_BTN_RIGHT",
+        [SCREEN_BTN_SELECT] = "SCREEN_BTN_SELECT",
+    };
+
+    if (button >= SCREEN_BTN_MAX || button_names[button] == NULL) {
+        return "UNKNOWN";
+    }
+
+    return button_names[button];
 }
 
 void screen_notify_bt_device_found(const char* device_name, esp_bd_addr_t bda) {
@@ -344,6 +363,10 @@ static esp_err_t screen_handle_btn_press(screen_button button) {
         selected_bt_device_idx = find_next_bt_device(selected_bt_device_idx);
         screen_show_bt_scan();
         break;
+    case SCREEN_BTN_SELECT:
+        if (selected_bt_device_idx >= 0)
+            bt_app_connect_to(bt_devices[selected_bt_device_idx].name, bt_devices[selected_bt_device_idx].bda);
+        break;
     default:
         break;
     }
@@ -378,8 +401,8 @@ static void screen_show_bt_scan(void) {
             lv_obj_set_width(device_label, LCD_H_RES - 24);
             lv_label_set_long_mode(device_label, LV_LABEL_LONG_WRAP);
             lv_label_set_text_fmt(device_label, "%s\n%02X:%02X:%02X:%02X:%02X:%02X", bt_devices[i].name,
-                                  bt_devices[i].bda[0], bt_devices[i].bda[1], bt_devices[i].bda[2], bt_devices[i].bda[3],
-                                  bt_devices[i].bda[4], bt_devices[i].bda[5]);
+                                  bt_devices[i].bda[0], bt_devices[i].bda[1], bt_devices[i].bda[2],
+                                  bt_devices[i].bda[3], bt_devices[i].bda[4], bt_devices[i].bda[5]);
             if (i == selected_bt_device_idx) {
                 lv_obj_set_style_bg_color(device_label, lv_color_hex(0x202020), LV_PART_MAIN);
                 lv_obj_set_style_bg_opa(device_label, LV_OPA_COVER, LV_PART_MAIN);

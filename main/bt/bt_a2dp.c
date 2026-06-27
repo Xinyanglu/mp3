@@ -19,6 +19,33 @@ static void bt_app_av_state_connecting_hdlr(uint16_t event, void* param);
 static void bt_app_av_state_connected_hdlr(uint16_t event, void* param);
 static void bt_app_av_state_disconnecting_hdlr(uint16_t event, void* param);
 static void bt_app_av_media_proc(uint16_t event, void* param);
+static const char* bt_app_av_event_to_str(uint16_t event);
+static const char* bt_app_av_state_to_str(int state);
+
+static const char* const s_a2d_event_names[] = {
+    [ESP_A2D_CONNECTION_STATE_EVT] = "ESP_A2D_CONNECTION_STATE_EVT",
+    [ESP_A2D_AUDIO_STATE_EVT] = "ESP_A2D_AUDIO_STATE_EVT",
+    [ESP_A2D_AUDIO_CFG_EVT] = "ESP_A2D_AUDIO_CFG_EVT",
+    [ESP_A2D_MEDIA_CTRL_ACK_EVT] = "ESP_A2D_MEDIA_CTRL_ACK_EVT",
+    [ESP_A2D_PROF_STATE_EVT] = "ESP_A2D_PROF_STATE_EVT",
+    [ESP_A2D_SEP_REG_STATE_EVT] = "ESP_A2D_SEP_REG_STATE_EVT",
+    [ESP_A2D_SNK_PSC_CFG_EVT] = "ESP_A2D_SNK_PSC_CFG_EVT",
+    [ESP_A2D_SNK_SET_DELAY_VALUE_EVT] = "ESP_A2D_SNK_SET_DELAY_VALUE_EVT",
+    [ESP_A2D_SNK_GET_DELAY_VALUE_EVT] = "ESP_A2D_SNK_GET_DELAY_VALUE_EVT",
+    [ESP_A2D_REPORT_SNK_DELAY_VALUE_EVT] = "ESP_A2D_REPORT_SNK_DELAY_VALUE_EVT",
+    [ESP_A2D_REPORT_SNK_CODEC_CAPS_EVT] = "ESP_A2D_REPORT_SNK_CODEC_CAPS_EVT",
+    [ESP_A2D_SRC_SET_PREF_MCC_EVT] = "ESP_A2D_SRC_SET_PREF_MCC_EVT",
+};
+
+static const char* const s_av_state_names[] = {
+    [APP_AV_STATE_IDLE] = "APP_AV_STATE_IDLE",
+    [APP_AV_STATE_DISCOVERING] = "APP_AV_STATE_DISCOVERING",
+    [APP_AV_STATE_DISCOVERED] = "APP_AV_STATE_DISCOVERED",
+    [APP_AV_STATE_UNCONNECTED] = "APP_AV_STATE_UNCONNECTED",
+    [APP_AV_STATE_CONNECTING] = "APP_AV_STATE_CONNECTING",
+    [APP_AV_STATE_CONNECTED] = "APP_AV_STATE_CONNECTED",
+    [APP_AV_STATE_DISCONNECTING] = "APP_AV_STATE_DISCONNECTING",
+};
 
 void bt_app_a2d_cb(esp_a2d_cb_event_t event, esp_a2d_cb_param_t* param) {
     bt_app_work_dispatch(bt_app_av_sm_hdlr, event, param, sizeof(esp_a2d_cb_param_t), NULL);
@@ -43,7 +70,8 @@ void bt_app_a2d_heart_beat(TimerHandle_t arg) {
 
 void bt_app_av_sm_hdlr(uint16_t event, void* param) {
     bt_log_enter(__func__);
-    ESP_LOGI(BT_AV_TAG, "%s state: %d, event: 0x%x", __func__, s_a2d_state, event);
+    ESP_LOGI(BT_AV_TAG, "%s state: %s (%d), event: %s (0x%x)", __func__, bt_app_av_state_to_str(s_a2d_state),
+             s_a2d_state, bt_app_av_event_to_str(event), event);
 
     switch (s_a2d_state) {
     case APP_AV_STATE_DISCOVERING:
@@ -66,6 +94,27 @@ void bt_app_av_sm_hdlr(uint16_t event, void* param) {
         break;
     }
     bt_log_leave(__func__);
+}
+
+static const char* bt_app_av_event_to_str(uint16_t event) {
+    if (event == BT_APP_HEART_BEAT_EVT) {
+        return "BT_APP_HEART_BEAT_EVT";
+    }
+
+    if (event >= (sizeof(s_a2d_event_names) / sizeof(s_a2d_event_names[0])) || s_a2d_event_names[event] == NULL) {
+        return "UNKNOWN";
+    }
+
+    return s_a2d_event_names[event];
+}
+
+static const char* bt_app_av_state_to_str(int state) {
+    if (state < 0 || state >= (int)(sizeof(s_av_state_names) / sizeof(s_av_state_names[0])) ||
+        s_av_state_names[state] == NULL) {
+        return "UNKNOWN";
+    }
+
+    return s_av_state_names[state];
 }
 
 static bool is_one_bit_set_u8(uint8_t v) {
