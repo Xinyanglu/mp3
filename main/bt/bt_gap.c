@@ -41,34 +41,34 @@ static const char* gap_event_to_str(uint16_t event);
 static void bt_app_gap_build_msg(bt_app_gap_msg_t* msg, esp_bt_gap_cb_event_t event, esp_bt_gap_cb_param_t* param);
 
 static const char* const s_gap_event_names[] = {
-    [ESP_BT_GAP_DISC_RES_EVT] = "ESP_BT_GAP_DISC_RES_EVT",
-    [ESP_BT_GAP_DISC_STATE_CHANGED_EVT] = "ESP_BT_GAP_DISC_STATE_CHANGED_EVT",
-    [ESP_BT_GAP_RMT_SRVCS_EVT] = "ESP_BT_GAP_RMT_SRVCS_EVT",
-    [ESP_BT_GAP_RMT_SRVC_REC_EVT] = "ESP_BT_GAP_RMT_SRVC_REC_EVT",
-    [ESP_BT_GAP_AUTH_CMPL_EVT] = "ESP_BT_GAP_AUTH_CMPL_EVT",
-    [ESP_BT_GAP_PIN_REQ_EVT] = "ESP_BT_GAP_PIN_REQ_EVT",
-    [ESP_BT_GAP_CFM_REQ_EVT] = "ESP_BT_GAP_CFM_REQ_EVT",
-    [ESP_BT_GAP_KEY_NOTIF_EVT] = "ESP_BT_GAP_KEY_NOTIF_EVT",
-    [ESP_BT_GAP_KEY_REQ_EVT] = "ESP_BT_GAP_KEY_REQ_EVT",
-    [ESP_BT_GAP_READ_RSSI_DELTA_EVT] = "ESP_BT_GAP_READ_RSSI_DELTA_EVT",
-    [ESP_BT_GAP_CONFIG_EIR_DATA_EVT] = "ESP_BT_GAP_CONFIG_EIR_DATA_EVT",
-    [ESP_BT_GAP_SET_AFH_CHANNELS_EVT] = "ESP_BT_GAP_SET_AFH_CHANNELS_EVT",
-    [ESP_BT_GAP_READ_REMOTE_NAME_EVT] = "ESP_BT_GAP_READ_REMOTE_NAME_EVT",
-    [ESP_BT_GAP_MODE_CHG_EVT] = "ESP_BT_GAP_MODE_CHG_EVT",
+    [ESP_BT_GAP_DISC_RES_EVT]                 = "ESP_BT_GAP_DISC_RES_EVT",
+    [ESP_BT_GAP_DISC_STATE_CHANGED_EVT]       = "ESP_BT_GAP_DISC_STATE_CHANGED_EVT",
+    [ESP_BT_GAP_RMT_SRVCS_EVT]                = "ESP_BT_GAP_RMT_SRVCS_EVT",
+    [ESP_BT_GAP_RMT_SRVC_REC_EVT]             = "ESP_BT_GAP_RMT_SRVC_REC_EVT",
+    [ESP_BT_GAP_AUTH_CMPL_EVT]                = "ESP_BT_GAP_AUTH_CMPL_EVT",
+    [ESP_BT_GAP_PIN_REQ_EVT]                  = "ESP_BT_GAP_PIN_REQ_EVT",
+    [ESP_BT_GAP_CFM_REQ_EVT]                  = "ESP_BT_GAP_CFM_REQ_EVT",
+    [ESP_BT_GAP_KEY_NOTIF_EVT]                = "ESP_BT_GAP_KEY_NOTIF_EVT",
+    [ESP_BT_GAP_KEY_REQ_EVT]                  = "ESP_BT_GAP_KEY_REQ_EVT",
+    [ESP_BT_GAP_READ_RSSI_DELTA_EVT]          = "ESP_BT_GAP_READ_RSSI_DELTA_EVT",
+    [ESP_BT_GAP_CONFIG_EIR_DATA_EVT]          = "ESP_BT_GAP_CONFIG_EIR_DATA_EVT",
+    [ESP_BT_GAP_SET_AFH_CHANNELS_EVT]         = "ESP_BT_GAP_SET_AFH_CHANNELS_EVT",
+    [ESP_BT_GAP_READ_REMOTE_NAME_EVT]         = "ESP_BT_GAP_READ_REMOTE_NAME_EVT",
+    [ESP_BT_GAP_MODE_CHG_EVT]                 = "ESP_BT_GAP_MODE_CHG_EVT",
     [ESP_BT_GAP_REMOVE_BOND_DEV_COMPLETE_EVT] = "ESP_BT_GAP_REMOVE_BOND_DEV_COMPLETE_EVT",
-    [ESP_BT_GAP_QOS_CMPL_EVT] = "ESP_BT_GAP_QOS_CMPL_EVT",
-    [ESP_BT_GAP_ACL_CONN_CMPL_STAT_EVT] = "ESP_BT_GAP_ACL_CONN_CMPL_STAT_EVT",
-    [ESP_BT_GAP_ACL_DISCONN_CMPL_STAT_EVT] = "ESP_BT_GAP_ACL_DISCONN_CMPL_STAT_EVT",
-    [ESP_BT_GAP_SET_PAGE_TO_EVT] = "ESP_BT_GAP_SET_PAGE_TO_EVT",
-    [ESP_BT_GAP_GET_PAGE_TO_EVT] = "ESP_BT_GAP_GET_PAGE_TO_EVT",
-    [ESP_BT_GAP_ACL_PKT_TYPE_CHANGED_EVT] = "ESP_BT_GAP_ACL_PKT_TYPE_CHANGED_EVT",
-    [ESP_BT_GAP_ENC_CHG_EVT] = "ESP_BT_GAP_ENC_CHG_EVT",
-    [ESP_BT_GAP_SET_MIN_ENC_KEY_SIZE_EVT] = "ESP_BT_GAP_SET_MIN_ENC_KEY_SIZE_EVT",
-    [ESP_BT_GAP_GET_DEV_NAME_CMPL_EVT] = "ESP_BT_GAP_GET_DEV_NAME_CMPL_EVT",
+    [ESP_BT_GAP_QOS_CMPL_EVT]                 = "ESP_BT_GAP_QOS_CMPL_EVT",
+    [ESP_BT_GAP_ACL_CONN_CMPL_STAT_EVT]       = "ESP_BT_GAP_ACL_CONN_CMPL_STAT_EVT",
+    [ESP_BT_GAP_ACL_DISCONN_CMPL_STAT_EVT]    = "ESP_BT_GAP_ACL_DISCONN_CMPL_STAT_EVT",
+    [ESP_BT_GAP_SET_PAGE_TO_EVT]              = "ESP_BT_GAP_SET_PAGE_TO_EVT",
+    [ESP_BT_GAP_GET_PAGE_TO_EVT]              = "ESP_BT_GAP_GET_PAGE_TO_EVT",
+    [ESP_BT_GAP_ACL_PKT_TYPE_CHANGED_EVT]     = "ESP_BT_GAP_ACL_PKT_TYPE_CHANGED_EVT",
+    [ESP_BT_GAP_ENC_CHG_EVT]                  = "ESP_BT_GAP_ENC_CHG_EVT",
+    [ESP_BT_GAP_SET_MIN_ENC_KEY_SIZE_EVT]     = "ESP_BT_GAP_SET_MIN_ENC_KEY_SIZE_EVT",
+    [ESP_BT_GAP_GET_DEV_NAME_CMPL_EVT]        = "ESP_BT_GAP_GET_DEV_NAME_CMPL_EVT",
 };
 
 static bool get_name_from_eir(uint8_t* eir, char* bdname, uint8_t* bdname_len) {
-    uint8_t* rmt_bdname = NULL;
+    uint8_t* rmt_bdname    = NULL;
     uint8_t rmt_bdname_len = 0;
 
     if (!eir) {
@@ -177,7 +177,7 @@ static void bt_app_connect_to_handler(uint16_t event __attribute__((unused)), vo
         return;
 
     bt_app_connect_msg_t* msg = (bt_app_connect_msg_t*)param;
-    char bda_str[18] = {0};
+    char bda_str[18]          = {0};
 
     ESP_LOGI(BT_AV_TAG, "Connecting to %s [%s]", msg->name, bt_bda2str(msg->bda, bda_str, sizeof(bda_str)));
     memcpy(s_peer_bda, msg->bda, sizeof(esp_bd_addr_t));
@@ -225,7 +225,7 @@ static void bt_app_gap_build_disc_res(bt_app_gap_disc_res_t* disc_res, const esp
         switch (p->type) {
         case ESP_BT_GAP_DEV_PROP_COD:
             if (p->val != NULL && p->len >= (int)sizeof(disc_res->cod)) {
-                disc_res->cod = *(uint32_t*)p->val;
+                disc_res->cod     = *(uint32_t*)p->val;
                 disc_res->has_cod = true;
             }
             break;

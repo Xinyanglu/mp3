@@ -71,9 +71,9 @@ bool bt_app_work_dispatch(bt_app_cb_t p_cback, uint16_t event, void* p_params, i
     bt_app_msg_t msg;
     memset(&msg, 0, sizeof(bt_app_msg_t));
 
-    msg.sig = BT_APP_SIG_WORK_DISPATCH;
+    msg.sig   = BT_APP_SIG_WORK_DISPATCH;
     msg.event = event;
-    msg.cb = p_cback;
+    msg.cb    = p_cback;
 
     if (param_len == 0) {
         return bt_app_send_msg(&msg);

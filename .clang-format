@@ -12,5 +12,7 @@ DerivePointerAlignment: false
 AllowShortFunctionsOnASingleLine: None
 AllowShortIfStatementsOnASingleLine: Never
 AllowShortLoopsOnASingleLine: false
+AlignConsecutiveAssignments: true
+BinPackArguments: false
 
 SortIncludes: false

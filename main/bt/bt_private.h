@@ -25,7 +25,7 @@
 #define APP_RC_CT_TL_RN_VOLUME_CHANGE 1
 
 enum {
-    BT_APP_STACK_UP_EVT = 0x0000,
+    BT_APP_STACK_UP_EVT   = 0x0000,
     BT_APP_HEART_BEAT_EVT = 0xff00,
 };
 

@@ -18,7 +18,7 @@
 #define BUTTON_DEBOUNCE_MS 200
 
 static QueueHandle_t buttons_event_queue = NULL;
-static TaskHandle_t buttons_task_handle = NULL;
+static TaskHandle_t buttons_task_handle  = NULL;
 static TickType_t last_button_ticks[SCREEN_BTN_MAX];
 
 typedef struct {
@@ -74,10 +74,10 @@ esp_err_t buttons_init(void) {
 
     const gpio_config_t button_config = {
         .pin_bit_mask = (1ULL << BUTTON_SELECT) | (1ULL << BUTTON_UP) | (1ULL << BUTTON_DOWN),
-        .mode = GPIO_MODE_INPUT,
-        .pull_up_en = GPIO_PULLUP_ENABLE,
+        .mode         = GPIO_MODE_INPUT,
+        .pull_up_en   = GPIO_PULLUP_ENABLE,
         .pull_down_en = GPIO_PULLDOWN_DISABLE,
-        .intr_type = GPIO_INTR_NEGEDGE,
+        .intr_type    = GPIO_INTR_NEGEDGE,
     };
 
     ESP_RETURN_ON_ERROR(gpio_config(&button_config), TAG, "Select button GPIO config failed");
@@ -87,11 +87,14 @@ esp_err_t buttons_init(void) {
         ESP_RETURN_ON_ERROR(ret, TAG, "GPIO ISR service install failed");
     }
 
-    ESP_RETURN_ON_ERROR(gpio_isr_handler_add(BUTTON_SELECT, button_select_isr_handler, (void*)SCREEN_BTN_SELECT), TAG,
+    ESP_RETURN_ON_ERROR(gpio_isr_handler_add(BUTTON_SELECT, button_select_isr_handler, (void*)SCREEN_BTN_SELECT),
+                        TAG,
                         "Select button ISR add failed");
-    ESP_RETURN_ON_ERROR(gpio_isr_handler_add(BUTTON_UP, button_select_isr_handler, (void*)SCREEN_BTN_UP), TAG,
+    ESP_RETURN_ON_ERROR(gpio_isr_handler_add(BUTTON_UP, button_select_isr_handler, (void*)SCREEN_BTN_UP),
+                        TAG,
                         "Up button ISR add failed");
-    ESP_RETURN_ON_ERROR(gpio_isr_handler_add(BUTTON_DOWN, button_select_isr_handler, (void*)SCREEN_BTN_DOWN), TAG,
+    ESP_RETURN_ON_ERROR(gpio_isr_handler_add(BUTTON_DOWN, button_select_isr_handler, (void*)SCREEN_BTN_DOWN),
+                        TAG,
                         "Down button ISR add failed");
 
     BaseType_t task_created = xTaskCreate(buttons_task_handler, "ButtonsTask", 3072, NULL, 10, &buttons_task_handle);

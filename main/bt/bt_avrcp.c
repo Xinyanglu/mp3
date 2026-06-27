@@ -59,8 +59,15 @@ static void bt_av_hdl_avrc_ct_evt(uint16_t event, void* p_param) {
     switch (event) {
     case ESP_AVRC_CT_CONNECTION_STATE_EVT: {
         uint8_t* bda = rc->conn_stat.remote_bda;
-        ESP_LOGI(BT_RC_CT_TAG, "AVRC conn_state event: state %d, [%02x:%02x:%02x:%02x:%02x:%02x]",
-                 rc->conn_stat.connected, bda[0], bda[1], bda[2], bda[3], bda[4], bda[5]);
+        ESP_LOGI(BT_RC_CT_TAG,
+                 "AVRC conn_state event: state %d, [%02x:%02x:%02x:%02x:%02x:%02x]",
+                 rc->conn_stat.connected,
+                 bda[0],
+                 bda[1],
+                 bda[2],
+                 bda[3],
+                 bda[4],
+                 bda[5]);
 
         if (rc->conn_stat.connected) {
             esp_avrc_ct_send_get_rn_capabilities_cmd(APP_RC_CT_TL_GET_CAPS);
@@ -70,11 +77,16 @@ static void bt_av_hdl_avrc_ct_evt(uint16_t event, void* p_param) {
         break;
     }
     case ESP_AVRC_CT_PASSTHROUGH_RSP_EVT:
-        ESP_LOGI(BT_RC_CT_TAG, "AVRC passthrough response: key_code 0x%x, key_state %d, rsp_code %d",
-                 rc->psth_rsp.key_code, rc->psth_rsp.key_state, rc->psth_rsp.rsp_code);
+        ESP_LOGI(BT_RC_CT_TAG,
+                 "AVRC passthrough response: key_code 0x%x, key_state %d, rsp_code %d",
+                 rc->psth_rsp.key_code,
+                 rc->psth_rsp.key_state,
+                 rc->psth_rsp.rsp_code);
         break;
     case ESP_AVRC_CT_METADATA_RSP_EVT:
-        ESP_LOGI(BT_RC_CT_TAG, "AVRC metadata response: attribute id 0x%x, %s", rc->meta_rsp.attr_id,
+        ESP_LOGI(BT_RC_CT_TAG,
+                 "AVRC metadata response: attribute id 0x%x, %s",
+                 rc->meta_rsp.attr_id,
                  rc->meta_rsp.attr_text);
         free(rc->meta_rsp.attr_text);
         break;
@@ -83,11 +95,15 @@ static void bt_av_hdl_avrc_ct_evt(uint16_t event, void* p_param) {
         bt_av_notify_evt_handler(rc->change_ntf.event_id, &rc->change_ntf.event_parameter);
         break;
     case ESP_AVRC_CT_REMOTE_FEATURES_EVT:
-        ESP_LOGI(BT_RC_CT_TAG, "AVRC remote features %" PRIx32 ", TG features %x", rc->rmt_feats.feat_mask,
+        ESP_LOGI(BT_RC_CT_TAG,
+                 "AVRC remote features %" PRIx32 ", TG features %x",
+                 rc->rmt_feats.feat_mask,
                  rc->rmt_feats.tg_feat_flag);
         break;
     case ESP_AVRC_CT_GET_RN_CAPABILITIES_RSP_EVT:
-        ESP_LOGI(BT_RC_CT_TAG, "remote rn_cap: count %d, bitmask 0x%x", rc->get_rn_caps_rsp.cap_count,
+        ESP_LOGI(BT_RC_CT_TAG,
+                 "remote rn_cap: count %d, bitmask 0x%x",
+                 rc->get_rn_caps_rsp.cap_count,
                  rc->get_rn_caps_rsp.evt_set.bits);
         s_avrc_peer_rn_cap.bits = rc->get_rn_caps_rsp.evt_set.bits;
         bt_av_volume_changed();

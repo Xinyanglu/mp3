@@ -75,41 +75,41 @@ static int find_next_bt_device(int start_idx);
 static int find_prev_bt_device(int start_idx);
 
 static QueueHandle_t screen_event_queue = NULL;
-static TaskHandle_t screen_task_handle = NULL;
+static TaskHandle_t screen_task_handle  = NULL;
 
 static esp_err_t init_lcd(void) {
     const gpio_config_t bk_gpio_config = {
-        .mode = GPIO_MODE_OUTPUT,
+        .mode         = GPIO_MODE_OUTPUT,
         .pin_bit_mask = 1ULL << PIN_NUM_BK_LIGHT,
     };
     ESP_RETURN_ON_ERROR(gpio_config(&bk_gpio_config), TAG, "Backlight GPIO config failed");
     ESP_RETURN_ON_ERROR(gpio_set_level(PIN_NUM_BK_LIGHT, LCD_BK_LIGHT_OFF_LEVEL), TAG, "Backlight off failed");
 
     const spi_bus_config_t buscfg = {
-        .sclk_io_num = PIN_NUM_PCLK,
-        .mosi_io_num = PIN_NUM_MOSI,
-        .miso_io_num = -1,
-        .quadwp_io_num = -1,
-        .quadhd_io_num = -1,
+        .sclk_io_num     = PIN_NUM_PCLK,
+        .mosi_io_num     = PIN_NUM_MOSI,
+        .miso_io_num     = -1,
+        .quadwp_io_num   = -1,
+        .quadhd_io_num   = -1,
         .max_transfer_sz = LCD_H_RES * LCD_DRAW_BUFF_HEIGHT * sizeof(uint16_t),
     };
     ESP_RETURN_ON_ERROR(spi_bus_initialize(LCD_HOST, &buscfg, SPI_DMA_CH_AUTO), TAG, "SPI bus init failed");
 
     const esp_lcd_panel_io_spi_config_t io_config = {
-        .dc_gpio_num = PIN_NUM_DC,
-        .cs_gpio_num = PIN_NUM_CS,
-        .pclk_hz = LCD_PIXEL_CLOCK_HZ,
-        .lcd_cmd_bits = LCD_CMD_BITS,
-        .lcd_param_bits = LCD_PARAM_BITS,
-        .spi_mode = 0,
+        .dc_gpio_num       = PIN_NUM_DC,
+        .cs_gpio_num       = PIN_NUM_CS,
+        .pclk_hz           = LCD_PIXEL_CLOCK_HZ,
+        .lcd_cmd_bits      = LCD_CMD_BITS,
+        .lcd_param_bits    = LCD_PARAM_BITS,
+        .spi_mode          = 0,
         .trans_queue_depth = 10,
     };
-    ESP_RETURN_ON_ERROR(esp_lcd_new_panel_io_spi((esp_lcd_spi_bus_handle_t)LCD_HOST, &io_config, &lcd_io), TAG,
-                        "Panel IO init failed");
+    ESP_RETURN_ON_ERROR(
+        esp_lcd_new_panel_io_spi((esp_lcd_spi_bus_handle_t)LCD_HOST, &io_config, &lcd_io), TAG, "Panel IO init failed");
 
     const esp_lcd_panel_dev_config_t panel_config = {
         .reset_gpio_num = PIN_NUM_RST,
-        .rgb_ele_order = LCD_RGB_ELEMENT_ORDER_RGB,
+        .rgb_ele_order  = LCD_RGB_ELEMENT_ORDER_RGB,
         .bits_per_pixel = LCD_BITS_PER_PIXEL,
     };
     ESP_RETURN_ON_ERROR(esp_lcd_new_panel_st7789(lcd_io, &panel_config, &lcd_panel), TAG, "Panel init failed");
@@ -128,19 +128,19 @@ static esp_err_t init_lvgl(void) {
     ESP_RETURN_ON_ERROR(lvgl_port_init(&lvgl_cfg), TAG, "LVGL init failed");
 
     const lvgl_port_display_cfg_t disp_cfg = {
-        .io_handle = lcd_io,
-        .panel_handle = lcd_panel,
-        .buffer_size = LCD_H_RES * LCD_DRAW_BUFF_HEIGHT,
+        .io_handle     = lcd_io,
+        .panel_handle  = lcd_panel,
+        .buffer_size   = LCD_H_RES * LCD_DRAW_BUFF_HEIGHT,
         .double_buffer = true,
-        .hres = LCD_H_RES,
-        .vres = LCD_V_RES,
-        .monochrome = false,
+        .hres          = LCD_H_RES,
+        .vres          = LCD_V_RES,
+        .monochrome    = false,
 #if LVGL_VERSION_MAJOR >= 9
         .color_format = LV_COLOR_FORMAT_RGB565,
 #endif
         .rotation =
             {
-                .swap_xy = true,
+                .swap_xy  = true,
                 .mirror_x = true,
                 .mirror_y = false,
             },
@@ -194,24 +194,24 @@ esp_err_t screen_init(void) {
 
     const esp_timer_create_args_t timer_args = {
         .callback = screen_notify_bt_refresh,
-        .name = "bt_scan_refresh",
+        .name     = "bt_scan_refresh",
     };
 
-    ESP_RETURN_ON_ERROR(esp_timer_create(&timer_args, &bt_scan_refresh_timer), TAG,
-                        "BT scan refresh timer create failed");
+    ESP_RETURN_ON_ERROR(
+        esp_timer_create(&timer_args, &bt_scan_refresh_timer), TAG, "BT scan refresh timer create failed");
 
-    ESP_RETURN_ON_ERROR(esp_timer_start_periodic(bt_scan_refresh_timer, 5 * 1000 * 1000), TAG,
-                        "BT scan refresh timer start failed");
+    ESP_RETURN_ON_ERROR(
+        esp_timer_start_periodic(bt_scan_refresh_timer, 5 * 1000 * 1000), TAG, "BT scan refresh timer start failed");
 
     return ESP_OK;
 }
 
 static const char* screen_button_to_str(screen_button button) {
     static const char* const button_names[] = {
-        [SCREEN_BTN_UP] = "SCREEN_BTN_UP",
-        [SCREEN_BTN_DOWN] = "SCREEN_BTN_DOWN",
-        [SCREEN_BTN_LEFT] = "SCREEN_BTN_LEFT",
-        [SCREEN_BTN_RIGHT] = "SCREEN_BTN_RIGHT",
+        [SCREEN_BTN_UP]     = "SCREEN_BTN_UP",
+        [SCREEN_BTN_DOWN]   = "SCREEN_BTN_DOWN",
+        [SCREEN_BTN_LEFT]   = "SCREEN_BTN_LEFT",
+        [SCREEN_BTN_RIGHT]  = "SCREEN_BTN_RIGHT",
         [SCREEN_BTN_SELECT] = "SCREEN_BTN_SELECT",
     };
 
@@ -389,20 +389,26 @@ static void screen_show_bt_scan(void) {
         lv_obj_set_style_text_color(title, lv_color_hex(0x202020), LV_PART_MAIN);
         lv_obj_align(title, LV_ALIGN_TOP_LEFT, 12, 12);
 
-        int y = 40;
+        int y             = 40;
         bool found_device = false;
         for (int i = 0; i < MAX_BT_DEVICE_NUM; i++) {
             if (bt_devices[i].name[0] == '\0') {
                 continue;
             }
 
-            found_device = true;
+            found_device           = true;
             lv_obj_t* device_label = lv_label_create(screen);
             lv_obj_set_width(device_label, LCD_H_RES - 24);
             lv_label_set_long_mode(device_label, LV_LABEL_LONG_WRAP);
-            lv_label_set_text_fmt(device_label, "%s\n%02X:%02X:%02X:%02X:%02X:%02X", bt_devices[i].name,
-                                  bt_devices[i].bda[0], bt_devices[i].bda[1], bt_devices[i].bda[2],
-                                  bt_devices[i].bda[3], bt_devices[i].bda[4], bt_devices[i].bda[5]);
+            lv_label_set_text_fmt(device_label,
+                                  "%s\n%02X:%02X:%02X:%02X:%02X:%02X",
+                                  bt_devices[i].name,
+                                  bt_devices[i].bda[0],
+                                  bt_devices[i].bda[1],
+                                  bt_devices[i].bda[2],
+                                  bt_devices[i].bda[3],
+                                  bt_devices[i].bda[4],
+                                  bt_devices[i].bda[5]);
             if (i == selected_bt_device_idx) {
                 lv_obj_set_style_bg_color(device_label, lv_color_hex(0x202020), LV_PART_MAIN);
                 lv_obj_set_style_bg_opa(device_label, LV_OPA_COVER, LV_PART_MAIN);
