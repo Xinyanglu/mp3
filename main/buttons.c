@@ -12,8 +12,8 @@
 #define TAG "Buttons"
 
 #define BUTTON_SELECT GPIO_NUM_4
-#define BUTTON_UP GPIO_NUM_5
-#define BUTTON_DOWN GPIO_NUM_2
+#define BUTTON_UP GPIO_NUM_21
+#define BUTTON_DOWN GPIO_NUM_32
 
 #define BUTTON_DEBOUNCE_MS 200
 

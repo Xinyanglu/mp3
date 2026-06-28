@@ -1,3 +1,9 @@
+/*
+ * LCD and UI task handling.
+ *
+ * Owns LVGL display setup, Bluetooth discovery list rendering, and button-driven
+ * screen navigation.
+ */
 #include "screen.h"
 
 #include <stdbool.h>
@@ -48,7 +54,7 @@ typedef struct {
     int64_t last_discovered_ms;
 } screen_bt_device_t;
 
-typedef enum { SCREEN_STATE_BT_DISCOVERY } screen_state;
+typedef enum { SCREEN_STATE_BT_DISCOVERY, SCREEN_STATE_SONG_SELECT } screen_state;
 
 static const char* TAG = "screen";
 
