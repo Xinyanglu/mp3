@@ -54,7 +54,6 @@ void bt_av_hdl_stack_evt(uint16_t event, void* p_param __attribute__((unused))) 
 }
 
 void init_bt_app(void) {
-    char bda_str[18] = {0};
     esp_err_t ret;
 
     ret = nvs_flash_init();
@@ -93,7 +92,6 @@ void init_bt_app(void) {
     esp_bt_io_cap_t iocap        = ESP_BT_IO_CAP_IO;
     esp_bt_gap_set_security_param(param_type, &iocap, sizeof(uint8_t));
 
-    ESP_LOGI(BT_AV_TAG, "Own address:[%s]", bt_bda2str((uint8_t*)esp_bt_dev_get_address(), bda_str, sizeof(bda_str)));
     bt_app_task_start_up();
     bt_app_work_dispatch(bt_av_hdl_stack_evt, BT_APP_STACK_UP_EVT, NULL, 0, NULL);
 }

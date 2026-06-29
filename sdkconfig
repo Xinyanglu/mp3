@@ -1422,6 +1422,13 @@ CONFIG_I2C_MASTER_ISR_HANDLER_IN_IRAM=y
 # end of ESP-Driver:I2S Configurations
 
 #
+# ESP-Driver:SD Host SDMMC Controller Configurations
+#
+# default:
+# CONFIG_SD_HOST_SDMMC_ISR_CACHE_SAFE is not set
+# end of ESP-Driver:SD Host SDMMC Controller Configurations
+
+#
 # ESP-Driver:SPI Configurations
 #
 # default:
@@ -2206,6 +2213,110 @@ CONFIG_ESP_WIFI_ENTERPRISE_SUPPORT=y
 # default:
 # CONFIG_ESP_WIFI_ENT_FREE_DYNAMIC_BUFFER is not set
 # end of Wi-Fi
+
+#
+# FAT Filesystem support
+#
+# default:
+CONFIG_FATFS_VOLUME_COUNT=2
+# default:
+# CONFIG_FATFS_LFN_NONE is not set
+# default:
+CONFIG_FATFS_LFN_HEAP=y
+# default:
+# CONFIG_FATFS_LFN_STACK is not set
+# default:
+# CONFIG_FATFS_SECTOR_512 is not set
+# default:
+CONFIG_FATFS_SECTOR_4096=y
+# default:
+# CONFIG_FATFS_CODEPAGE_DYNAMIC is not set
+# default:
+CONFIG_FATFS_CODEPAGE_437=y
+# default:
+# CONFIG_FATFS_CODEPAGE_720 is not set
+# default:
+# CONFIG_FATFS_CODEPAGE_737 is not set
+# default:
+# CONFIG_FATFS_CODEPAGE_771 is not set
+# default:
+# CONFIG_FATFS_CODEPAGE_775 is not set
+# default:
+# CONFIG_FATFS_CODEPAGE_850 is not set
+# default:
+# CONFIG_FATFS_CODEPAGE_852 is not set
+# default:
+# CONFIG_FATFS_CODEPAGE_855 is not set
+# default:
+# CONFIG_FATFS_CODEPAGE_857 is not set
+# default:
+# CONFIG_FATFS_CODEPAGE_860 is not set
+# default:
+# CONFIG_FATFS_CODEPAGE_861 is not set
+# default:
+# CONFIG_FATFS_CODEPAGE_862 is not set
+# default:
+# CONFIG_FATFS_CODEPAGE_863 is not set
+# default:
+# CONFIG_FATFS_CODEPAGE_864 is not set
+# default:
+# CONFIG_FATFS_CODEPAGE_865 is not set
+# default:
+# CONFIG_FATFS_CODEPAGE_866 is not set
+# default:
+# CONFIG_FATFS_CODEPAGE_869 is not set
+# default:
+# CONFIG_FATFS_CODEPAGE_932 is not set
+# default:
+# CONFIG_FATFS_CODEPAGE_936 is not set
+# default:
+# CONFIG_FATFS_CODEPAGE_949 is not set
+# default:
+# CONFIG_FATFS_CODEPAGE_950 is not set
+# default:
+CONFIG_FATFS_CODEPAGE=437
+# default:
+CONFIG_FATFS_MAX_LFN=255
+# default:
+CONFIG_FATFS_API_ENCODING_ANSI_OEM=y
+# default:
+# CONFIG_FATFS_API_ENCODING_UTF_8 is not set
+# default:
+CONFIG_FATFS_FS_LOCK=0
+# default:
+CONFIG_FATFS_TIMEOUT_MS=10000
+# default:
+CONFIG_FATFS_PER_FILE_CACHE=y
+# default:
+CONFIG_FATFS_ALLOC_PREFER_EXTRAM=y
+# default:
+# CONFIG_FATFS_USE_FASTSEEK is not set
+# default:
+CONFIG_FATFS_USE_STRFUNC_NONE=y
+# default:
+# CONFIG_FATFS_USE_STRFUNC_WITHOUT_CRLF_CONV is not set
+# default:
+# CONFIG_FATFS_USE_STRFUNC_WITH_CRLF_CONV is not set
+# default:
+CONFIG_FATFS_VFS_FSTAT_BLKSIZE=0
+# default:
+# CONFIG_FATFS_IMMEDIATE_FSYNC is not set
+# default:
+# CONFIG_FATFS_USE_LABEL is not set
+# default:
+CONFIG_FATFS_LINK_LOCK=y
+# default:
+CONFIG_FATFS_USE_DYN_BUFFERS=y
+
+#
+# File system free space calculation behavior
+#
+# default:
+CONFIG_FATFS_DONT_TRUST_FREE_CLUSTER_CNT=0
+# default:
+CONFIG_FATFS_DONT_TRUST_LAST_ALLOC=0
+# end of File system free space calculation behavior
+# end of FAT Filesystem support
 
 #
 # FreeRTOS
@@ -3170,6 +3281,13 @@ CONFIG_PTHREAD_TASK_NAME_DEFAULT="pthread"
 # end of PThreads
 
 #
+# SD Protocol Layer Configuration
+#
+# default:
+CONFIG_SD_ENABLE_SDIO_SUPPORT=y
+# end of SD Protocol Layer Configuration
+
+#
 # MMU Config
 #
 # default:
@@ -3302,6 +3420,17 @@ CONFIG_VFS_SEMIHOSTFS_MAX_MOUNT_POINTS=1
 # default:
 CONFIG_VFS_INITIALIZE_DEV_NULL=y
 # end of Virtual file system
+
+#
+# Wear Levelling
+#
+# default:
+# CONFIG_WL_SECTOR_SIZE_512 is not set
+# default:
+CONFIG_WL_SECTOR_SIZE_4096=y
+# default:
+CONFIG_WL_SECTOR_SIZE=4096
+# end of Wear Levelling
 
 #
 # JPEG Decoder
