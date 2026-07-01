@@ -53,7 +53,7 @@ static sdcard_config_t sdcard_default_config = {
     .gpio_cs                = GPIO_NUM_5,
     .max_files              = 5,
     .format_if_mount_failed = false,
-    .max_freq_khz           = 20000,
+    .max_freq_khz           = 1000,
     .max_transfer_sz        = 4000,
 };
 

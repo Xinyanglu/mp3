@@ -23,6 +23,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #include "freertos/task.h"
+#include "sdcard.h"
 
 #define LCD_HOST SPI2_HOST
 
@@ -64,6 +65,7 @@ static lv_display_t* display;
 static screen_bt_device_t bt_devices[MAX_BT_DEVICE_NUM];
 static uint8_t num_bt_devices;
 static int selected_bt_device_idx = -1;
+static int selected_song_idx      = -1;
 static esp_timer_handle_t bt_scan_refresh_timer;
 static screen_state current_screen = SCREEN_STATE_BT_DISCOVERY;
 
@@ -79,6 +81,7 @@ static const char* screen_button_to_str(screen_button button);
 static int find_first_bt_device(void);
 static int find_next_bt_device(int start_idx);
 static int find_prev_bt_device(int start_idx);
+static void screen_show_song_selection(void);
 
 static QueueHandle_t screen_event_queue = NULL;
 static TaskHandle_t screen_task_handle  = NULL;
@@ -183,6 +186,12 @@ static void screen_task_handler(void* arg __attribute__((unused))) {
             case SCREEN_EVT_BT_DEVICE_FOUND:
                 screen_add_bt_device(msg.device_name, msg.bda);
                 break;
+
+            case SCREEN_EVT_BT_DEVICE_CONNECTED:
+                current_screen = SCREEN_STATE_SONG_SELECT;
+                screen_show_song_selection();
+                break;
+
             default:
                 ESP_LOGW(TAG, "%s, unhandled event: %d", __func__, msg.event);
                 break;
@@ -243,6 +252,11 @@ void screen_notify_bt_refresh(void* arg) {
 
 void screen_notify_button_press(screen_button button) {
     screen_msg msg = {.event = SCREEN_EVT_BTN_PRESS, .button = button};
+    xQueueSend(screen_event_queue, &msg, 0);
+}
+
+void screen_notify_show_song_selection(void) {
+    screen_msg msg = {.event = SCREEN_EVT_BT_DEVICE_CONNECTED};
     xQueueSend(screen_event_queue, &msg, 0);
 }
 
@@ -429,6 +443,61 @@ static void screen_show_bt_scan(void) {
         if (!found_device) {
             lv_obj_t* status = lv_label_create(screen);
             lv_label_set_text(status, "Scanning...");
+            lv_obj_set_style_text_color(status, lv_color_hex(0x666666), LV_PART_MAIN);
+            lv_obj_align(status, LV_ALIGN_TOP_LEFT, 12, y);
+        }
+
+        lvgl_port_unlock();
+    }
+}
+
+static void screen_show_song_selection(void) {
+    size_t songs_count = sdcard_get_song_count();
+
+    if (songs_count == 0) {
+        selected_song_idx = -1;
+    } else if (selected_song_idx < 0 || selected_song_idx >= (int)songs_count) {
+        selected_song_idx = 0;
+    }
+
+    if (lvgl_port_lock(0)) {
+        lv_obj_t* screen = lv_screen_active();
+        lv_obj_clean(screen);
+        lv_obj_set_style_bg_color(screen, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
+        lv_obj_set_style_bg_opa(screen, LV_OPA_COVER, LV_PART_MAIN);
+
+        lv_obj_t* title = lv_label_create(screen);
+        lv_label_set_text_fmt(title, "Songs: %u", (unsigned int)songs_count);
+        lv_obj_set_style_text_color(title, lv_color_hex(0x202020), LV_PART_MAIN);
+        lv_obj_align(title, LV_ALIGN_TOP_LEFT, 12, 12);
+
+        int y = 40;
+        for (size_t i = 0; i < songs_count; i++) {
+            const sdcard_song_t* song = sdcard_get_song(i);
+            if (song == NULL) {
+                continue;
+            }
+
+            lv_obj_t* song_label = lv_label_create(screen);
+            lv_obj_set_width(song_label, LCD_H_RES - 24);
+            lv_label_set_long_mode(song_label, LV_LABEL_LONG_DOT);
+            lv_label_set_text(song_label, song->name);
+
+            if ((int)i == selected_song_idx) {
+                lv_obj_set_style_bg_color(song_label, lv_color_hex(0x202020), LV_PART_MAIN);
+                lv_obj_set_style_bg_opa(song_label, LV_OPA_COVER, LV_PART_MAIN);
+                lv_obj_set_style_text_color(song_label, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
+            } else {
+                lv_obj_set_style_text_color(song_label, lv_color_hex(0x202020), LV_PART_MAIN);
+            }
+
+            lv_obj_align(song_label, LV_ALIGN_TOP_LEFT, 12, y);
+            y += 28;
+        }
+
+        if (songs_count == 0) {
+            lv_obj_t* status = lv_label_create(screen);
+            lv_label_set_text(status, "No songs found");
             lv_obj_set_style_text_color(status, lv_color_hex(0x666666), LV_PART_MAIN);
             lv_obj_align(status, LV_ALIGN_TOP_LEFT, 12, y);
         }

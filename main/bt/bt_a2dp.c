@@ -11,6 +11,7 @@
 #include "bt_app_core.h"
 #include "esp_err.h"
 #include "esp_log.h"
+#include "screen.h"
 
 static bool check_pref_mcc_against_sink_caps(const esp_a2d_mcc_t* sink_caps, const esp_a2d_mcc_t* pref_mcc);
 static void bt_app_a2d_set_pref_mcc(esp_a2d_conn_hdl_t conn_hdl, const esp_a2d_mcc_t* sink_caps);
@@ -69,7 +70,6 @@ void bt_app_a2d_heart_beat(TimerHandle_t arg) {
 }
 
 void bt_app_av_sm_hdlr(uint16_t event, void* param) {
-    bt_log_enter(__func__);
     ESP_LOGI(BT_AV_TAG,
              "%s state: %s (%d), event: %s (0x%x)",
              __func__,
@@ -98,7 +98,6 @@ void bt_app_av_sm_hdlr(uint16_t event, void* param) {
         ESP_LOGE(BT_AV_TAG, "%s invalid state: %d", __func__, s_a2d_state);
         break;
     }
-    bt_log_leave(__func__);
 }
 
 static const char* bt_app_av_event_to_str(uint16_t event) {
@@ -237,6 +236,7 @@ static void bt_app_av_state_connecting_hdlr(uint16_t event, void* param) {
             ESP_LOGI(BT_AV_TAG, "a2dp connected");
             s_a2d_state   = APP_AV_STATE_CONNECTED;
             s_media_state = APP_AV_MEDIA_STATE_IDLE;
+            screen_notify_show_song_selection();
         } else if (a2d->conn_stat.state == ESP_A2D_CONNECTION_STATE_DISCONNECTED) {
             s_a2d_state = APP_AV_STATE_UNCONNECTED;
         }

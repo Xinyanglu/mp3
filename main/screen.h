@@ -8,6 +8,7 @@ typedef enum {
     SCREEN_EVT_REFRESH_BT_SCAN,
     SCREEN_EVT_BT_DEVICE_FOUND,
     SCREEN_EVT_BTN_PRESS,
+    SCREEN_EVT_BT_DEVICE_CONNECTED,
 } screen_event;
 
 typedef enum {
@@ -30,3 +31,4 @@ esp_err_t screen_init(void);
 void screen_notify_bt_device_found(const char* device_name, esp_bd_addr_t bda);
 void screen_notify_bt_refresh(void* arg);
 void screen_notify_button_press(screen_button button);
+void screen_notify_show_song_selection(void);

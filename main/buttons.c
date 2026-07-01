@@ -16,23 +16,37 @@
 #define BUTTON_DOWN GPIO_NUM_32
 
 #define BUTTON_DEBOUNCE_MS 200
+#define BUTTON_TASK_PRIORITY 10
 
 static QueueHandle_t buttons_event_queue = NULL;
 static TaskHandle_t buttons_task_handle  = NULL;
-static TickType_t last_button_ticks[SCREEN_BTN_MAX];
+static TickType_t last_button_isr_ticks[SCREEN_BTN_MAX];
 
 typedef struct {
     screen_button event;
 } button_msg;
 
 static void IRAM_ATTR button_select_isr_handler(void* arg) {
+    screen_button event = (screen_button)(uintptr_t)arg;
+    TickType_t now      = xTaskGetTickCountFromISR();
+
+    if (event < 0 || event >= SCREEN_BTN_MAX) {
+        return;
+    }
+
+    if (last_button_isr_ticks[event] != 0 && (now - last_button_isr_ticks[event]) < pdMS_TO_TICKS(BUTTON_DEBOUNCE_MS)) {
+        return;
+    }
+
     button_msg msg = {
-        .event = (screen_button)(uintptr_t)arg,
+        .event = event,
     };
     BaseType_t higher_priority_task_woken = pdFALSE;
 
     if (buttons_event_queue != NULL) {
-        xQueueSendFromISR(buttons_event_queue, &msg, &higher_priority_task_woken);
+        if (xQueueSendFromISR(buttons_event_queue, &msg, &higher_priority_task_woken) == pdTRUE) {
+            last_button_isr_ticks[event] = now;
+        }
     }
 
     if (higher_priority_task_woken == pdTRUE) {
@@ -45,21 +59,15 @@ static void buttons_task_handler(void* arg __attribute__((unused))) {
 
     while (1) {
         if (pdTRUE == xQueueReceive(buttons_event_queue, &msg, (TickType_t)portMAX_DELAY)) {
-            ESP_LOGI(TAG, "%s, event: 0x%x", __func__, msg.event);
-
             switch (msg.event) {
             case SCREEN_BTN_UP:
             case SCREEN_BTN_DOWN:
             case SCREEN_BTN_LEFT:
             case SCREEN_BTN_RIGHT:
-            case SCREEN_BTN_SELECT: {
-                TickType_t now = xTaskGetTickCount();
-                if ((now - last_button_ticks[msg.event]) >= pdMS_TO_TICKS(BUTTON_DEBOUNCE_MS)) {
-                    last_button_ticks[msg.event] = now;
-                    screen_notify_button_press(msg.event);
-                }
+            case SCREEN_BTN_SELECT:
+                ESP_LOGI(TAG, "%s, event: 0x%x", __func__, msg.event);
+                screen_notify_button_press(msg.event);
                 break;
-            }
             default:
                 ESP_LOGW(TAG, "%s, unhandled event: %d", __func__, msg.event);
                 break;
@@ -97,7 +105,8 @@ esp_err_t buttons_init(void) {
                         TAG,
                         "Down button ISR add failed");
 
-    BaseType_t task_created = xTaskCreate(buttons_task_handler, "ButtonsTask", 3072, NULL, 10, &buttons_task_handle);
+    BaseType_t task_created =
+        xTaskCreate(buttons_task_handler, "ButtonsTask", 3072, NULL, BUTTON_TASK_PRIORITY, &buttons_task_handle);
     ESP_RETURN_ON_FALSE(task_created == pdPASS, ESP_ERR_NO_MEM, TAG, "Button task create failed");
 
     return ESP_OK;
