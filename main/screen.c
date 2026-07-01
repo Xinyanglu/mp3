@@ -366,29 +366,49 @@ static esp_err_t screen_add_bt_device(const char* name, esp_bd_addr_t bda) {
 }
 
 static esp_err_t screen_handle_btn_press(screen_button button) {
-    if (current_screen != SCREEN_STATE_BT_DISCOVERY) {
-        return ESP_OK;
-    }
+    if (current_screen == SCREEN_STATE_BT_DISCOVERY) {
+        if (selected_bt_device_idx < 0 || bt_devices[selected_bt_device_idx].name[0] == '\0') {
+            selected_bt_device_idx = find_first_bt_device();
+        }
 
-    if (selected_bt_device_idx < 0 || bt_devices[selected_bt_device_idx].name[0] == '\0') {
-        selected_bt_device_idx = find_first_bt_device();
-    }
+        switch (button) {
+        case SCREEN_BTN_UP:
+            selected_bt_device_idx = find_prev_bt_device(selected_bt_device_idx);
+            screen_show_bt_scan();
+            break;
+        case SCREEN_BTN_DOWN:
+            selected_bt_device_idx = find_next_bt_device(selected_bt_device_idx);
+            screen_show_bt_scan();
+            break;
+        case SCREEN_BTN_SELECT:
+            if (selected_bt_device_idx >= 0)
+                bt_app_connect_to(bt_devices[selected_bt_device_idx].name, bt_devices[selected_bt_device_idx].bda);
+            break;
+        default:
+            break;
+        }
+    } else if (current_screen == SCREEN_STATE_SONG_SELECT) {
+        size_t songs_count = sdcard_get_song_count();
 
-    switch (button) {
-    case SCREEN_BTN_UP:
-        selected_bt_device_idx = find_prev_bt_device(selected_bt_device_idx);
-        screen_show_bt_scan();
-        break;
-    case SCREEN_BTN_DOWN:
-        selected_bt_device_idx = find_next_bt_device(selected_bt_device_idx);
-        screen_show_bt_scan();
-        break;
-    case SCREEN_BTN_SELECT:
-        if (selected_bt_device_idx >= 0)
-            bt_app_connect_to(bt_devices[selected_bt_device_idx].name, bt_devices[selected_bt_device_idx].bda);
-        break;
-    default:
-        break;
+        if (songs_count == 0) {
+            selected_song_idx = -1;
+            return ESP_OK;
+        }
+
+        switch (button) {
+        case SCREEN_BTN_UP:
+            selected_song_idx = (selected_song_idx - 1 + (int)songs_count) % (int)songs_count;
+            screen_show_song_selection();
+            break;
+        case SCREEN_BTN_DOWN:
+            selected_song_idx = (selected_song_idx + 1) % (int)songs_count;
+            screen_show_song_selection();
+            break;
+        case SCREEN_BTN_SELECT:
+            break;
+        default:
+            break;
+        }
     }
 
     return ESP_OK;
