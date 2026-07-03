@@ -24,6 +24,7 @@
 #include "freertos/queue.h"
 #include "freertos/task.h"
 #include "sdcard.h"
+#include "player.h"
 
 #define LCD_HOST SPI2_HOST
 
@@ -55,7 +56,6 @@ typedef struct {
     int64_t last_discovered_ms;
 } screen_bt_device_t;
 
-typedef enum { SCREEN_STATE_BT_DISCOVERY, SCREEN_STATE_SONG_SELECT } screen_state;
 
 static const char* TAG = "screen";
 
@@ -77,11 +77,14 @@ static void screen_refresh_bt_scan(void* arg);
 static void screen_show_bt_scan(void);
 static esp_err_t screen_add_bt_device(const char* name, esp_bd_addr_t bda);
 static esp_err_t screen_handle_btn_press(screen_button button);
+static esp_err_t screen_handle_bt_discovery_btn_press(screen_button button);
+static esp_err_t screen_handle_song_select_btn_press(screen_button button);
 static const char* screen_button_to_str(screen_button button);
 static int find_first_bt_device(void);
 static int find_next_bt_device(int start_idx);
 static int find_prev_bt_device(int start_idx);
 static void screen_show_song_selection(void);
+static void screen_show_song_loading(void);
 
 static QueueHandle_t screen_event_queue = NULL;
 static TaskHandle_t screen_task_handle  = NULL;
@@ -180,7 +183,9 @@ static void screen_task_handler(void* arg __attribute__((unused))) {
 
             case SCREEN_EVT_BTN_PRESS:
                 ESP_LOGI(TAG, "Button press: %s (%d)", screen_button_to_str(msg.button), msg.button);
-                screen_handle_btn_press(msg.button);
+                if (current_screen == msg.screen_state) {
+                    screen_handle_btn_press(msg.button);
+                }
                 break;
 
             case SCREEN_EVT_BT_DEVICE_FOUND:
@@ -251,7 +256,7 @@ void screen_notify_bt_refresh(void* arg) {
 }
 
 void screen_notify_button_press(screen_button button) {
-    screen_msg msg = {.event = SCREEN_EVT_BTN_PRESS, .button = button};
+    screen_msg msg = {.event = SCREEN_EVT_BTN_PRESS, .button = button, .screen_state = current_screen};
     xQueueSend(screen_event_queue, &msg, 0);
 }
 
@@ -366,49 +371,70 @@ static esp_err_t screen_add_bt_device(const char* name, esp_bd_addr_t bda) {
 }
 
 static esp_err_t screen_handle_btn_press(screen_button button) {
-    if (current_screen == SCREEN_STATE_BT_DISCOVERY) {
-        if (selected_bt_device_idx < 0 || bt_devices[selected_bt_device_idx].name[0] == '\0') {
-            selected_bt_device_idx = find_first_bt_device();
-        }
+    switch (current_screen) {
+    case SCREEN_STATE_BT_DISCOVERY:
+        return screen_handle_bt_discovery_btn_press(button);
+    case SCREEN_STATE_SONG_SELECT:
+        return screen_handle_song_select_btn_press(button);
+    case SCREEN_STATE_SONG_LOADING:
+    default:
+        return ESP_OK;
+    }
+}
 
-        switch (button) {
-        case SCREEN_BTN_UP:
-            selected_bt_device_idx = find_prev_bt_device(selected_bt_device_idx);
-            screen_show_bt_scan();
-            break;
-        case SCREEN_BTN_DOWN:
-            selected_bt_device_idx = find_next_bt_device(selected_bt_device_idx);
-            screen_show_bt_scan();
-            break;
-        case SCREEN_BTN_SELECT:
-            if (selected_bt_device_idx >= 0)
-                bt_app_connect_to(bt_devices[selected_bt_device_idx].name, bt_devices[selected_bt_device_idx].bda);
-            break;
-        default:
-            break;
-        }
-    } else if (current_screen == SCREEN_STATE_SONG_SELECT) {
-        size_t songs_count = sdcard_get_song_count();
+static esp_err_t screen_handle_bt_discovery_btn_press(screen_button button) {
+    if (selected_bt_device_idx < 0 || bt_devices[selected_bt_device_idx].name[0] == '\0') {
+        selected_bt_device_idx = find_first_bt_device();
+    }
 
-        if (songs_count == 0) {
-            selected_song_idx = -1;
-            return ESP_OK;
-        }
+    switch (button) {
+    case SCREEN_BTN_UP:
+        selected_bt_device_idx = find_prev_bt_device(selected_bt_device_idx);
+        screen_show_bt_scan();
+        break;
+    case SCREEN_BTN_DOWN:
+        selected_bt_device_idx = find_next_bt_device(selected_bt_device_idx);
+        screen_show_bt_scan();
+        break;
+    case SCREEN_BTN_SELECT:
+        if (selected_bt_device_idx >= 0)
+            bt_app_connect_to(bt_devices[selected_bt_device_idx].name, bt_devices[selected_bt_device_idx].bda);
+        break;
+    default:
+        break;
+    }
 
-        switch (button) {
-        case SCREEN_BTN_UP:
-            selected_song_idx = (selected_song_idx - 1 + (int)songs_count) % (int)songs_count;
-            screen_show_song_selection();
-            break;
-        case SCREEN_BTN_DOWN:
-            selected_song_idx = (selected_song_idx + 1) % (int)songs_count;
-            screen_show_song_selection();
-            break;
-        case SCREEN_BTN_SELECT:
-            break;
-        default:
-            break;
-        }
+    return ESP_OK;
+}
+
+static esp_err_t screen_handle_song_select_btn_press(screen_button button) {
+    size_t songs_count = sdcard_get_song_count();
+
+    if (songs_count == 0) {
+        selected_song_idx = -1;
+        return ESP_OK;
+    }
+
+    if (selected_song_idx < 0 || selected_song_idx >= (int)songs_count) {
+        selected_song_idx = 0;
+    }
+
+    switch (button) {
+    case SCREEN_BTN_UP:
+        selected_song_idx = (selected_song_idx - 1 + (int)songs_count) % (int)songs_count;
+        screen_show_song_selection();
+        break;
+    case SCREEN_BTN_DOWN:
+        selected_song_idx = (selected_song_idx + 1) % (int)songs_count;
+        screen_show_song_selection();
+        break;
+    case SCREEN_BTN_SELECT:
+        current_screen = SCREEN_STATE_SONG_LOADING;
+        screen_show_song_loading();
+        player_play(selected_song_idx);
+        break;
+    default:
+        break;
     }
 
     return ESP_OK;
@@ -521,6 +547,35 @@ static void screen_show_song_selection(void) {
             lv_obj_set_style_text_color(status, lv_color_hex(0x666666), LV_PART_MAIN);
             lv_obj_align(status, LV_ALIGN_TOP_LEFT, 12, y);
         }
+
+        lvgl_port_unlock();
+    }
+}
+
+static void screen_show_song_loading(void) {
+    const sdcard_song_t* song = NULL;
+
+    if (selected_song_idx >= 0) {
+        song = sdcard_get_song((size_t)selected_song_idx);
+    }
+
+    if (lvgl_port_lock(0)) {
+        lv_obj_t* screen = lv_screen_active();
+        lv_obj_clean(screen);
+        lv_obj_set_style_bg_color(screen, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
+        lv_obj_set_style_bg_opa(screen, LV_OPA_COVER, LV_PART_MAIN);
+
+        lv_obj_t* title = lv_label_create(screen);
+        lv_label_set_text(title, "Loading song...");
+        lv_obj_set_style_text_color(title, lv_color_hex(0x202020), LV_PART_MAIN);
+        lv_obj_align(title, LV_ALIGN_TOP_LEFT, 12, 12);
+
+        lv_obj_t* song_label = lv_label_create(screen);
+        lv_obj_set_width(song_label, LCD_H_RES - 24);
+        lv_label_set_long_mode(song_label, LV_LABEL_LONG_DOT);
+        lv_label_set_text(song_label, song != NULL ? song->name : "Selected song");
+        lv_obj_set_style_text_color(song_label, lv_color_hex(0x666666), LV_PART_MAIN);
+        lv_obj_align(song_label, LV_ALIGN_TOP_LEFT, 12, 44);
 
         lvgl_port_unlock();
     }

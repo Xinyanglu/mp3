@@ -11,6 +11,8 @@ typedef enum {
     SCREEN_EVT_BT_DEVICE_CONNECTED,
 } screen_event;
 
+typedef enum { SCREEN_STATE_BT_DISCOVERY, SCREEN_STATE_SONG_SELECT, SCREEN_STATE_SONG_LOADING } screen_state;
+
 typedef enum {
     SCREEN_BTN_UP,
     SCREEN_BTN_DOWN,
@@ -25,6 +27,7 @@ typedef struct {
     screen_button button;
     char device_name[MAX_DEVICE_NAME_LEN];
     esp_bd_addr_t bda;
+    screen_state screen_state;
 } screen_msg;
 
 esp_err_t screen_init(void);
