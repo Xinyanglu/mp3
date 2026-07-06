@@ -8,5 +8,8 @@
 #pragma once
 
 #include <esp_bt_defs.h>
+#include "esp_err.h"
+
 void init_bt_app(void);
 void bt_app_connect_to(const char* name, esp_bd_addr_t bda);
+void bt_app_start_media(void);

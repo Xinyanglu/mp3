@@ -11,6 +11,7 @@
 #include "bt_app_core.h"
 #include "esp_err.h"
 #include "esp_log.h"
+#include "player.h"
 #include "screen.h"
 
 static bool check_pref_mcc_against_sink_caps(const esp_a2d_mcc_t* sink_caps, const esp_a2d_mcc_t* pref_mcc);
@@ -57,16 +58,15 @@ int32_t bt_app_a2d_data_cb(uint8_t* data, int32_t len) {
         return 0;
     }
 
-    int16_t* p_buf = (int16_t*)data;
-    for (int i = 0; i < (len >> 1); i++) {
-        p_buf[i] = 0;
-    }
-
-    return len;
+    return player_read_pcm(data, len);
 }
 
 void bt_app_a2d_heart_beat(TimerHandle_t arg) {
     bt_app_work_dispatch(bt_app_av_sm_hdlr, BT_APP_HEART_BEAT_EVT, NULL, 0, NULL);
+}
+
+void bt_app_start_media(void) {
+    bt_app_work_dispatch(bt_app_av_sm_hdlr, BT_APP_MEDIA_START_EVT, NULL, 0, NULL);
 }
 
 void bt_app_av_sm_hdlr(uint16_t event, void* param) {
@@ -101,6 +101,10 @@ void bt_app_av_sm_hdlr(uint16_t event, void* param) {
 }
 
 static const char* bt_app_av_event_to_str(uint16_t event) {
+    if (event == BT_APP_MEDIA_START_EVT) {
+        return "BT_APP_MEDIA_START_EVT";
+    }
+
     if (event == BT_APP_HEART_BEAT_EVT) {
         return "BT_APP_HEART_BEAT_EVT";
     }
@@ -171,8 +175,8 @@ static void bt_app_a2d_set_pref_mcc(esp_a2d_conn_hdl_t conn_hdl, const esp_a2d_m
 
     memset(&pref_mcc, 0, sizeof(pref_mcc));
     pref_mcc.type                      = ESP_A2D_MCT_SBC;
-    pref_mcc.cie.sbc_info.samp_freq    = ESP_A2D_SBC_CIE_SF_44K;
-    pref_mcc.cie.sbc_info.ch_mode      = ESP_A2D_SBC_CIE_CH_MODE_MONO;
+    pref_mcc.cie.sbc_info.samp_freq    = ESP_A2D_SBC_CIE_SF_48K;
+    pref_mcc.cie.sbc_info.ch_mode      = ESP_A2D_SBC_CIE_CH_MODE_JOINT_STEREO;
     pref_mcc.cie.sbc_info.block_len    = ESP_A2D_SBC_CIE_BLOCK_LEN_16;
     pref_mcc.cie.sbc_info.num_subbands = ESP_A2D_SBC_CIE_NUM_SUBBANDS_8;
     pref_mcc.cie.sbc_info.alloc_mthd   = ESP_A2D_SBC_CIE_ALLOC_MTHD_LOUDNESS;
@@ -198,6 +202,7 @@ static void bt_app_av_state_unconnected_hdlr(uint16_t event, void* param) {
     case ESP_A2D_AUDIO_STATE_EVT:
     case ESP_A2D_AUDIO_CFG_EVT:
     case ESP_A2D_MEDIA_CTRL_ACK_EVT:
+    case BT_APP_MEDIA_START_EVT:
         break;
     case BT_APP_HEART_BEAT_EVT: {
         uint8_t* bda = s_peer_bda;
@@ -244,6 +249,7 @@ static void bt_app_av_state_connecting_hdlr(uint16_t event, void* param) {
     case ESP_A2D_AUDIO_STATE_EVT:
     case ESP_A2D_AUDIO_CFG_EVT:
     case ESP_A2D_MEDIA_CTRL_ACK_EVT:
+    case BT_APP_MEDIA_START_EVT:
         break;
     case BT_APP_HEART_BEAT_EVT:
         if (++s_connecting_intv >= 2) {
@@ -268,7 +274,7 @@ static void bt_app_av_media_proc(uint16_t event, void* param) {
 
     switch (s_media_state) {
     case APP_AV_MEDIA_STATE_IDLE:
-        if (event == BT_APP_HEART_BEAT_EVT) {
+        if (event == BT_APP_MEDIA_START_EVT) {
             ESP_LOGI(BT_AV_TAG, "a2dp media ready checking ...");
             esp_a2d_media_ctrl(ESP_A2D_MEDIA_CTRL_CHECK_SRC_RDY);
         } else if (event == ESP_A2D_MEDIA_CTRL_ACK_EVT) {
@@ -287,7 +293,6 @@ static void bt_app_av_media_proc(uint16_t event, void* param) {
             if (a2d->media_ctrl_stat.cmd == ESP_A2D_MEDIA_CTRL_START &&
                 a2d->media_ctrl_stat.status == ESP_A2D_MEDIA_CTRL_ACK_SUCCESS) {
                 ESP_LOGI(BT_AV_TAG, "a2dp media start successfully.");
-                s_intv_cnt    = 0;
                 s_media_state = APP_AV_MEDIA_STATE_STARTED;
             } else {
                 ESP_LOGI(BT_AV_TAG, "a2dp media start failed.");
@@ -296,14 +301,6 @@ static void bt_app_av_media_proc(uint16_t event, void* param) {
         }
         break;
     case APP_AV_MEDIA_STATE_STARTED:
-        if (event == BT_APP_HEART_BEAT_EVT) {
-            if (++s_intv_cnt >= 10) {
-                ESP_LOGI(BT_AV_TAG, "a2dp media suspending...");
-                esp_a2d_media_ctrl(ESP_A2D_MEDIA_CTRL_SUSPEND);
-                s_media_state = APP_AV_MEDIA_STATE_STOPPING;
-                s_intv_cnt    = 0;
-            }
-        }
         break;
     case APP_AV_MEDIA_STATE_STOPPING:
         if (event == ESP_A2D_MEDIA_CTRL_ACK_EVT) {
@@ -346,8 +343,10 @@ static void bt_app_av_state_connected_hdlr(uint16_t event, void* param) {
     case ESP_A2D_AUDIO_CFG_EVT:
         break;
     case ESP_A2D_MEDIA_CTRL_ACK_EVT:
-    case BT_APP_HEART_BEAT_EVT:
+    case BT_APP_MEDIA_START_EVT:
         bt_app_av_media_proc(event, param);
+        break;
+    case BT_APP_HEART_BEAT_EVT:
         break;
     case ESP_A2D_REPORT_SNK_DELAY_VALUE_EVT:
         a2d = (esp_a2d_cb_param_t*)(param);
@@ -398,6 +397,7 @@ static void bt_app_av_state_disconnecting_hdlr(uint16_t event, void* param) {
     case ESP_A2D_AUDIO_STATE_EVT:
     case ESP_A2D_AUDIO_CFG_EVT:
     case ESP_A2D_MEDIA_CTRL_ACK_EVT:
+    case BT_APP_MEDIA_START_EVT:
     case BT_APP_HEART_BEAT_EVT:
         break;
     case ESP_A2D_REPORT_SNK_DELAY_VALUE_EVT:

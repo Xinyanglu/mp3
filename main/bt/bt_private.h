@@ -27,6 +27,7 @@
 enum {
     BT_APP_STACK_UP_EVT   = 0x0000,
     BT_APP_HEART_BEAT_EVT = 0xff00,
+    BT_APP_MEDIA_START_EVT,
 };
 
 enum {

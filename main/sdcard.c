@@ -16,34 +16,17 @@
 #include "esp_err.h"
 #include "esp_log.h"
 #include "esp_vfs_fat.h"
-#include "freertos/FreeRTOS.h"
-#include "freertos/queue.h"
-#include "freertos/task.h"
 #include "sdmmc_cmd.h"
 
-#define SDCARD_QUEUE_LEN 10
-#define SDCARD_TASK_STACK_SIZE 4096
-#define SDCARD_TASK_PRIORITY 10
-
 static const char* TAG = "sdcard";
-
-typedef enum {
-    SDCARD_EVT_NONE,
-} sdcard_event_t;
-
-typedef struct {
-    sdcard_event_t event;
-} sdcard_msg_t;
 
 static char ROOT_PATH[SDCARD_MAX_PATH_LEN] = "/sdcard";
 static sdcard_song_t songs[SDCARD_MAX_SONGS];
 static size_t song_count;
-static int selected_song_idx = -1;
 static sdmmc_card_t* sd_card;
 static bool sdcard_mounted;
+static bool sdcard_initialized;
 static spi_host_device_t sdcard_host = SPI3_HOST;
-static QueueHandle_t sdcard_queue;
-static TaskHandle_t sdcard_task_handle;
 static sdcard_config_t sdcard_default_config = {
     .mount_path             = ROOT_PATH,
     .host                   = SPI3_HOST,
@@ -53,38 +36,29 @@ static sdcard_config_t sdcard_default_config = {
     .gpio_cs                = GPIO_NUM_5,
     .max_files              = 5,
     .format_if_mount_failed = false,
-    .max_freq_khz           = 1000,
+    .max_freq_khz           = 10000,
     .max_transfer_sz        = 4000,
 };
 
-static void sdcard_task_handler(void* arg);
 static bool sdcard_has_mp3_extension(const char* name);
 static esp_err_t sdcard_build_path(char* path, size_t path_size, const char* name);
 static bool sdcard_is_regular_file(const char* path, struct stat* st);
 static esp_err_t sdcard_add_song(const char* name);
 
 esp_err_t sdcard_init(void) {
-    song_count        = 0;
-    selected_song_idx = -1;
+    esp_err_t mount_ret;
 
-    ESP_LOGI(TAG, "SD card mount path: %s", ROOT_PATH);
-
-    if (sdcard_queue == NULL) {
-        sdcard_queue = xQueueCreate(SDCARD_QUEUE_LEN, sizeof(sdcard_msg_t));
-        if (sdcard_queue == NULL) {
-            return ESP_ERR_NO_MEM;
-        }
-
-        BaseType_t task_created = xTaskCreate(
-            sdcard_task_handler, "SdcardTask", SDCARD_TASK_STACK_SIZE, NULL, SDCARD_TASK_PRIORITY, &sdcard_task_handle);
-        if (task_created != pdPASS) {
-            vQueueDelete(sdcard_queue);
-            sdcard_queue = NULL;
-            return ESP_ERR_NO_MEM;
-        }
+    if (sdcard_initialized) {
+        return ESP_OK;
     }
 
-    return sdcard_mount();
+    mount_ret = sdcard_mount();
+    if (mount_ret != ESP_OK) {
+        return mount_ret;
+    }
+
+    sdcard_initialized = true;
+    return ESP_OK;
 }
 
 esp_err_t sdcard_mount(void) {
@@ -155,8 +129,8 @@ esp_err_t sdcard_unmount(void) {
 
     sd_card           = NULL;
     sdcard_mounted    = false;
+    sdcard_initialized = false;
     song_count        = 0;
-    selected_song_idx = -1;
 
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to free SD SPI bus: %s", esp_err_to_name(ret));
@@ -167,9 +141,7 @@ esp_err_t sdcard_unmount(void) {
 esp_err_t sdcard_scan_songs(void) {
     DIR* dir;
     struct dirent* entry;
-
     song_count        = 0;
-    selected_song_idx = -1;
 
     dir = opendir(ROOT_PATH);
     if (dir == NULL) {
@@ -179,10 +151,6 @@ esp_err_t sdcard_scan_songs(void) {
 
     while ((entry = readdir(dir)) != NULL) {
         ESP_LOGI(TAG, "SD card entry: %s", entry->d_name);
-
-        if (!sdcard_has_mp3_extension(entry->d_name)) {
-            continue;
-        }
 
         esp_err_t ret = sdcard_add_song(entry->d_name);
         if (ret == ESP_ERR_NO_MEM) {
@@ -208,40 +176,12 @@ const sdcard_song_t* sdcard_get_song(size_t index) {
     return &songs[index];
 }
 
-esp_err_t sdcard_select_song(size_t index) {
-    if (index >= song_count) {
+esp_err_t sdcard_get_song_path(size_t index, char* path, size_t path_size) {
+    if (index >= song_count || path == NULL || path_size == 0) {
         return ESP_ERR_INVALID_ARG;
     }
 
-    selected_song_idx = (int)index;
-    ESP_LOGI(TAG, "Selected song: %s", songs[index].name);
-    return ESP_OK;
-}
-
-const sdcard_song_t* sdcard_get_selected_song(void) {
-    if (selected_song_idx < 0) {
-        return NULL;
-    }
-
-    return &songs[selected_song_idx];
-}
-
-static void sdcard_task_handler(void* arg __attribute__((unused))) {
-    sdcard_msg_t msg;
-
-    while (1) {
-        if (xQueueReceive(sdcard_queue, &msg, portMAX_DELAY) != pdTRUE) {
-            continue;
-        }
-
-        switch (msg.event) {
-        case SDCARD_EVT_NONE:
-            break;
-        default:
-            ESP_LOGW(TAG, "Unhandled event: %d", msg.event);
-            break;
-        }
-    }
+    return sdcard_build_path(path, path_size, songs[index].name);
 }
 
 static bool sdcard_has_mp3_extension(const char* name) {
@@ -270,7 +210,7 @@ static esp_err_t sdcard_build_path(char* path, size_t path_size, const char* nam
 }
 
 static bool sdcard_is_regular_file(const char* path, struct stat* st) {
-    if (stat(path, st) != 0) {
+    if (stat(path, st) != 0 || st->st_size == 0) {
         return false;
     }
 
@@ -290,7 +230,7 @@ static esp_err_t sdcard_add_song(const char* name) {
         return ESP_OK;
     }
 
-    if (!sdcard_is_regular_file(path, &st)) {
+    if (!sdcard_has_mp3_extension(path) || !sdcard_is_regular_file(path, &st)) {
         return ESP_OK;
     }
 
@@ -298,10 +238,7 @@ static esp_err_t sdcard_add_song(const char* name) {
     memset(song, 0, sizeof(*song));
 
     strlcpy(song->name, name, sizeof(song->name));
-    strlcpy(song->path, path, sizeof(song->path));
-    if (st.st_size > 0) {
-        song->size_bytes = (uint32_t)st.st_size;
-    }
+    song->size_bytes = (uint32_t)st.st_size;
 
     ESP_LOGI(TAG, "Found song: %s", song->name);
     song_count++;

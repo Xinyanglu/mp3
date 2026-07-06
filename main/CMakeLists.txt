@@ -1,5 +1,6 @@
 idf_component_register(
     SRCS "main.c"
+         "player.c"
          "sdcard.c"
          "screen.c"
          "buttons.c"
@@ -12,5 +13,5 @@ idf_component_register(
          "bt/bt_utils.c"
     INCLUDE_DIRS "." "bt"
     PRIV_REQUIRES "bt" "esp_driver_gpio" "esp_driver_sdspi" "esp_driver_spi" "fatfs" "nvs_flash" "sdmmc" "esp_lcd"
-                  "esp_lvgl_port"
+                  "esp_lvgl_port" "espressif__esp_audio_simple_player"
 )
