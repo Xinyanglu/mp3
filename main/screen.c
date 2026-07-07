@@ -432,7 +432,6 @@ static esp_err_t screen_handle_song_select_btn_press(screen_button button) {
         current_screen = SCREEN_STATE_SONG_LOADING;
         screen_show_song_loading();
         ESP_RETURN_ON_ERROR(player_play(selected_song_idx), TAG, "Failed to start player");
-        bt_app_start_media();
         break;
     default:
         break;

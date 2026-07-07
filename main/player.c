@@ -6,9 +6,11 @@
  */
 #include "player.h"
 
+#include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
 
+#include "bt_app.h"
 #include "esp_audio_simple_player.h"
 #include "esp_check.h"
 #include "esp_heap_caps.h"
@@ -31,12 +33,16 @@
 #define PLAYER_FILE_URI_PREFIX "file://"
 #define PLAYER_MAX_FILE_URI_LEN (sizeof(PLAYER_FILE_URI_PREFIX) + SDCARD_MAX_PATH_LEN)
 #define PLAYER_PCM_STREAM_BUFFER_SIZE (32 * 1024)
+#define PLAYER_PCM_PRIME_BYTES (6 * 1024)
 #define PLAYER_PCM_WRITE_LOG_INTERVAL_BYTES (64 * 1024)
+#define PLAYER_PCM_GAIN_NUMERATOR 1
+#define PLAYER_PCM_GAIN_DENOMINATOR 4
 
 static const char* TAG = "player";
 static StreamBufferHandle_t pcm_stream;
 static size_t pcm_total_written;
 static size_t pcm_next_write_log;
+static bool pcm_media_started;
 
 typedef enum {
     PLAYER_EVT_PLAY,
@@ -63,6 +69,7 @@ static player_status_t player_status = {
 static void player_task_handler(void* arg);
 static esp_err_t player_send_msg(const player_msg_t* msg);
 static void player_handle_play(const char* path);
+static void player_apply_pcm_gain(uint8_t* data, size_t len);
 static esp_err_t player_build_file_uri(char* uri, size_t uri_size, const char* path);
 static esp_err_t player_gmf_err_to_esp_err(esp_gmf_err_t err);
 static esp_err_t player_decode_file(const char* path, player_audio_info_t* info);
@@ -86,6 +93,10 @@ static int player_simple_out_cb(uint8_t* data, int data_size, void* ctx) {
         ESP_LOGI(TAG, "First PCM output callback: %u bytes", (unsigned)data_len);
     }
 
+    if (decode_ctx->info != NULL && decode_ctx->info->bits_per_sample == 16) {
+        player_apply_pcm_gain(data, data_len);
+    }
+
     while (written < data_len) {
         size_t sent = xStreamBufferSend(pcm_stream, data + written, data_len - written, portMAX_DELAY);
         if (sent == 0) {
@@ -99,6 +110,15 @@ static int player_simple_out_cb(uint8_t* data, int data_size, void* ctx) {
         size_t buffered = xStreamBufferBytesAvailable(pcm_stream);
         ESP_LOGI(TAG, "PCM written: %u total, buffered %u", (unsigned)pcm_total_written, (unsigned)buffered);
         pcm_next_write_log += PLAYER_PCM_WRITE_LOG_INTERVAL_BYTES;
+    }
+
+    if (!pcm_media_started) {
+        size_t buffered = xStreamBufferBytesAvailable(pcm_stream);
+        if (buffered >= PLAYER_PCM_PRIME_BYTES) {
+            ESP_LOGI(TAG, "PCM primed: %u buffered, starting A2DP media", (unsigned)buffered);
+            pcm_media_started = true;
+            bt_app_start_media();
+        }
     }
 
     return 0;
@@ -125,6 +145,17 @@ static int player_simple_event_cb(esp_asp_event_pkt_t* event, void* ctx) {
              decode_ctx->info->bits_per_sample,
              decode_ctx->info->channels,
              decode_ctx->info->bitrate);
+
+    bt_app_audio_info_t bt_audio_info = {
+        .sample_rate     = decode_ctx->info->sample_rate,
+        .bits_per_sample = decode_ctx->info->bits_per_sample,
+        .channels        = decode_ctx->info->channels,
+        .bitrate         = decode_ctx->info->bitrate,
+    };
+    esp_err_t ret = bt_app_set_audio_info(&bt_audio_info);
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to dispatch decoded audio info to BT app: %s", esp_err_to_name(ret));
+    }
 
     return 0;
 }
@@ -354,6 +385,7 @@ static void player_handle_play(const char* path) {
     }
     pcm_total_written = 0;
     pcm_next_write_log = 0;
+    pcm_media_started = false;
 
     ESP_LOGI(TAG, "Playing song: %s", play_path);
     ret = player_decode_file(play_path, &audio_info);
@@ -366,6 +398,15 @@ static void player_handle_play(const char* path) {
     player_status.state = ret == ESP_OK ? PLAYER_STATE_STOPPED : PLAYER_STATE_ERROR;
 
     xSemaphoreGive(player_lock);
+}
+
+static void player_apply_pcm_gain(uint8_t* data, size_t len) {
+    int16_t* samples = (int16_t*)data;
+    size_t sample_count = len / sizeof(int16_t);
+
+    for (size_t i = 0; i < sample_count; i++) {
+        samples[i] = (int16_t)(((int32_t)samples[i] * PLAYER_PCM_GAIN_NUMERATOR) / PLAYER_PCM_GAIN_DENOMINATOR);
+    }
 }
 
 static esp_err_t player_build_file_uri(char* uri, size_t uri_size, const char* path) {
