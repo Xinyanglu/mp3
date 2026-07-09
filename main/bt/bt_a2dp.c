@@ -8,14 +8,25 @@
 
 #include <string.h>
 
+#include "bt_app.h"
 #include "bt_app_core.h"
 #include "esp_err.h"
 #include "esp_log.h"
+#include "freertos/task.h"
 #include "player.h"
 #include "screen.h"
 
+#define BT_APP_AUDIO_INFO_RETRY_INTERVAL_MS 100
+#define BT_APP_AUDIO_INFO_RETRY_MAX_ATTEMPTS 5
+
 static bool check_pref_mcc_against_sink_caps(const esp_a2d_mcc_t* sink_caps, const esp_a2d_mcc_t* pref_mcc);
-static void bt_app_a2d_set_pref_mcc(esp_a2d_conn_hdl_t conn_hdl, const esp_a2d_mcc_t* sink_caps);
+static bool bt_app_a2d_sbc_freq_from_sample_rate(uint32_t sample_rate, uint8_t* freq);
+static bool bt_app_a2d_sbc_ch_mode_from_channels(const esp_a2d_cie_sbc_t* caps, uint8_t channels, uint8_t* ch_mode);
+static void bt_app_a2d_store_sink_caps(esp_a2d_conn_hdl_t conn_hdl, const esp_a2d_mcc_t* sink_caps);
+static void bt_app_a2d_store_audio_info(const bt_app_audio_info_t* info);
+static void bt_app_a2d_set_pref_mcc(esp_a2d_conn_hdl_t conn_hdl,
+                                    const esp_a2d_mcc_t* sink_caps,
+                                    const bt_app_audio_info_t* audio_info);
 static void bt_app_av_state_unconnected_hdlr(uint16_t event, void* param);
 static void bt_app_av_state_connecting_hdlr(uint16_t event, void* param);
 static void bt_app_av_state_connected_hdlr(uint16_t event, void* param);
@@ -49,6 +60,11 @@ static const char* const s_av_state_names[] = {
     [APP_AV_STATE_DISCONNECTING] = "APP_AV_STATE_DISCONNECTING",
 };
 
+static esp_a2d_mcc_t s_sink_caps;
+static esp_a2d_conn_hdl_t s_sink_conn_hdl;
+static volatile bool s_sink_caps_valid;
+static bt_app_audio_info_t s_audio_info;
+
 void bt_app_a2d_cb(esp_a2d_cb_event_t event, esp_a2d_cb_param_t* param) {
     bt_app_work_dispatch(bt_app_av_sm_hdlr, event, param, sizeof(esp_a2d_cb_param_t), NULL);
 }
@@ -67,6 +83,28 @@ void bt_app_a2d_heart_beat(TimerHandle_t arg) {
 
 void bt_app_start_media(void) {
     bt_app_work_dispatch(bt_app_av_sm_hdlr, BT_APP_MEDIA_START_EVT, NULL, 0, NULL);
+}
+
+esp_err_t bt_app_set_audio_info(const bt_app_audio_info_t* info) {
+    if (info == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    for (uint8_t attempt = 0; !s_sink_caps_valid && attempt < BT_APP_AUDIO_INFO_RETRY_MAX_ATTEMPTS; attempt++) {
+        ESP_LOGW(BT_AV_TAG,
+                 "Sink capabilities unavailable, waiting before audio info dispatch: %u/%u",
+                 attempt + 1,
+                 BT_APP_AUDIO_INFO_RETRY_MAX_ATTEMPTS);
+        vTaskDelay(pdMS_TO_TICKS(BT_APP_AUDIO_INFO_RETRY_INTERVAL_MS));
+    }
+
+    if (!s_sink_caps_valid) {
+        ESP_LOGW(BT_AV_TAG, "Timed out waiting for sink capabilities before audio info dispatch");
+        return ESP_ERR_TIMEOUT;
+    }
+
+    return bt_app_work_dispatch(bt_app_av_sm_hdlr, BT_APP_AUDIO_INFO_EVT, (void*)info, sizeof(*info), NULL) ? ESP_OK
+                                                                                                           : ESP_FAIL;
 }
 
 void bt_app_av_sm_hdlr(uint16_t event, void* param) {
@@ -103,6 +141,10 @@ void bt_app_av_sm_hdlr(uint16_t event, void* param) {
 static const char* bt_app_av_event_to_str(uint16_t event) {
     if (event == BT_APP_MEDIA_START_EVT) {
         return "BT_APP_MEDIA_START_EVT";
+    }
+
+    if (event == BT_APP_AUDIO_INFO_EVT) {
+        return "BT_APP_AUDIO_INFO_EVT";
     }
 
     if (event == BT_APP_HEART_BEAT_EVT) {
@@ -169,19 +211,128 @@ static bool check_pref_mcc_against_sink_caps(const esp_a2d_mcc_t* sink_caps, con
     return true;
 }
 
-static void bt_app_a2d_set_pref_mcc(esp_a2d_conn_hdl_t conn_hdl, const esp_a2d_mcc_t* sink_caps) {
+static bool bt_app_a2d_sbc_freq_from_sample_rate(uint32_t sample_rate, uint8_t* freq) {
+    if (freq == NULL) {
+        return false;
+    }
+
+    switch (sample_rate) {
+    case 16000:
+        *freq = ESP_A2D_SBC_CIE_SF_16K;
+        return true;
+    case 32000:
+        *freq = ESP_A2D_SBC_CIE_SF_32K;
+        return true;
+    case 44100:
+        *freq = ESP_A2D_SBC_CIE_SF_44K;
+        return true;
+    case 48000:
+        *freq = ESP_A2D_SBC_CIE_SF_48K;
+        return true;
+    default:
+        return false;
+    }
+}
+
+static bool bt_app_a2d_sbc_ch_mode_from_channels(const esp_a2d_cie_sbc_t* caps, uint8_t channels, uint8_t* ch_mode) {
+    if (caps == NULL || ch_mode == NULL) {
+        return false;
+    }
+
+    if (channels == 1) {
+        if (caps->ch_mode & ESP_A2D_SBC_CIE_CH_MODE_MONO) {
+            *ch_mode = ESP_A2D_SBC_CIE_CH_MODE_MONO;
+            return true;
+        }
+    }
+
+    if (channels == 2) {
+        if (caps->ch_mode & ESP_A2D_SBC_CIE_CH_MODE_JOINT_STEREO) {
+            *ch_mode = ESP_A2D_SBC_CIE_CH_MODE_JOINT_STEREO;
+            return true;
+        }
+        if (caps->ch_mode & ESP_A2D_SBC_CIE_CH_MODE_STEREO) {
+            *ch_mode = ESP_A2D_SBC_CIE_CH_MODE_STEREO;
+            return true;
+        }
+        if (caps->ch_mode & ESP_A2D_SBC_CIE_CH_MODE_DUAL_CHANNEL) {
+            *ch_mode = ESP_A2D_SBC_CIE_CH_MODE_DUAL_CHANNEL;
+            return true;
+        }
+    }
+
+    return false;
+}
+
+static void bt_app_a2d_store_sink_caps(esp_a2d_conn_hdl_t conn_hdl, const esp_a2d_mcc_t* sink_caps) {
+    if (sink_caps == NULL) {
+        return;
+    }
+
+    s_sink_conn_hdl = conn_hdl;
+    s_sink_caps = *sink_caps;
+    s_sink_caps_valid = true;
+}
+
+static void bt_app_a2d_store_audio_info(const bt_app_audio_info_t* info) {
+    if (info == NULL) {
+        return;
+    }
+
+    s_audio_info = *info;
+
+    ESP_LOGI(BT_AV_TAG,
+             "Decoded audio info received: %lu Hz, %u bits, %u channel(s)",
+             s_audio_info.sample_rate,
+             s_audio_info.bits_per_sample,
+             s_audio_info.channels);
+
+    if (!s_sink_caps_valid) {
+        ESP_LOGW(BT_AV_TAG, "Cannot configure A2DP codec yet: sink capabilities not available");
+        return;
+    }
+
+    bt_app_a2d_set_pref_mcc(s_sink_conn_hdl, &s_sink_caps, &s_audio_info);
+}
+
+static void bt_app_a2d_set_pref_mcc(esp_a2d_conn_hdl_t conn_hdl,
+                                    const esp_a2d_mcc_t* sink_caps,
+                                    const bt_app_audio_info_t* audio_info) {
     bt_log_enter(__func__);
     esp_a2d_mcc_t pref_mcc;
+    uint8_t samp_freq;
+    uint8_t ch_mode;
+
+    if (sink_caps == NULL || audio_info == NULL) {
+        ESP_LOGW(BT_AV_TAG, "Cannot set pref_mcc without sink caps and decoded audio info");
+        return;
+    }
+    if (sink_caps->type != ESP_A2D_MCT_SBC) {
+        ESP_LOGW(BT_AV_TAG, "Cannot set pref_mcc for non-SBC sink codec type: %d", sink_caps->type);
+        return;
+    }
+    if (audio_info->bits_per_sample != 16) {
+        ESP_LOGW(BT_AV_TAG, "Unsupported decoded PCM bit depth for A2DP: %u", audio_info->bits_per_sample);
+        return;
+    }
+    if (!bt_app_a2d_sbc_freq_from_sample_rate(audio_info->sample_rate, &samp_freq)) {
+        ESP_LOGW(BT_AV_TAG, "Unsupported decoded PCM sample rate for SBC: %lu", audio_info->sample_rate);
+        return;
+    }
+    if (!bt_app_a2d_sbc_ch_mode_from_channels(&sink_caps->cie.sbc_info, audio_info->channels, &ch_mode)) {
+        ESP_LOGW(BT_AV_TAG, "Unsupported decoded PCM channel count for sink: %u", audio_info->channels);
+        return;
+    }
 
     memset(&pref_mcc, 0, sizeof(pref_mcc));
     pref_mcc.type                      = ESP_A2D_MCT_SBC;
-    pref_mcc.cie.sbc_info.samp_freq    = ESP_A2D_SBC_CIE_SF_48K;
-    pref_mcc.cie.sbc_info.ch_mode      = ESP_A2D_SBC_CIE_CH_MODE_JOINT_STEREO;
+    pref_mcc.cie.sbc_info.samp_freq    = samp_freq;
+    pref_mcc.cie.sbc_info.ch_mode      = ch_mode;
     pref_mcc.cie.sbc_info.block_len    = ESP_A2D_SBC_CIE_BLOCK_LEN_16;
     pref_mcc.cie.sbc_info.num_subbands = ESP_A2D_SBC_CIE_NUM_SUBBANDS_8;
     pref_mcc.cie.sbc_info.alloc_mthd   = ESP_A2D_SBC_CIE_ALLOC_MTHD_LOUDNESS;
-    pref_mcc.cie.sbc_info.min_bitpool  = 2;
-    pref_mcc.cie.sbc_info.max_bitpool  = 35;
+    pref_mcc.cie.sbc_info.min_bitpool  = sink_caps->cie.sbc_info.min_bitpool;
+    pref_mcc.cie.sbc_info.max_bitpool  = sink_caps->cie.sbc_info.max_bitpool;
 
     if (!check_pref_mcc_against_sink_caps(sink_caps, &pref_mcc)) {
         ESP_LOGW(BT_AV_TAG, "pref_mcc not supported by sink");
@@ -189,7 +340,12 @@ static void bt_app_a2d_set_pref_mcc(esp_a2d_conn_hdl_t conn_hdl, const esp_a2d_m
     }
 
     esp_err_t ret = esp_a2d_source_set_pref_mcc(conn_hdl, &pref_mcc);
-    ESP_LOGI(BT_AV_TAG, "Set pref_mcc result: %s", esp_err_to_name(ret));
+    ESP_LOGI(BT_AV_TAG,
+             "Set pref_mcc from decoded audio: %lu Hz, %u bits, %u channel(s), result: %s",
+             audio_info->sample_rate,
+             audio_info->bits_per_sample,
+             audio_info->channels,
+             esp_err_to_name(ret));
     bt_log_leave(__func__);
 }
 
@@ -203,6 +359,7 @@ static void bt_app_av_state_unconnected_hdlr(uint16_t event, void* param) {
     case ESP_A2D_AUDIO_CFG_EVT:
     case ESP_A2D_MEDIA_CTRL_ACK_EVT:
     case BT_APP_MEDIA_START_EVT:
+    case BT_APP_AUDIO_INFO_EVT:
         break;
     case BT_APP_HEART_BEAT_EVT: {
         uint8_t* bda = s_peer_bda;
@@ -244,12 +401,14 @@ static void bt_app_av_state_connecting_hdlr(uint16_t event, void* param) {
             screen_notify_show_song_selection();
         } else if (a2d->conn_stat.state == ESP_A2D_CONNECTION_STATE_DISCONNECTED) {
             s_a2d_state = APP_AV_STATE_UNCONNECTED;
+            s_sink_caps_valid = false;
         }
         break;
     case ESP_A2D_AUDIO_STATE_EVT:
     case ESP_A2D_AUDIO_CFG_EVT:
     case ESP_A2D_MEDIA_CTRL_ACK_EVT:
     case BT_APP_MEDIA_START_EVT:
+    case BT_APP_AUDIO_INFO_EVT:
         break;
     case BT_APP_HEART_BEAT_EVT:
         if (++s_connecting_intv >= 2) {
@@ -332,6 +491,7 @@ static void bt_app_av_state_connected_hdlr(uint16_t event, void* param) {
         if (a2d->conn_stat.state == ESP_A2D_CONNECTION_STATE_DISCONNECTED) {
             ESP_LOGI(BT_AV_TAG, "a2dp disconnected");
             s_a2d_state = APP_AV_STATE_UNCONNECTED;
+            s_sink_caps_valid = false;
         }
         break;
     case ESP_A2D_AUDIO_STATE_EVT:
@@ -345,6 +505,9 @@ static void bt_app_av_state_connected_hdlr(uint16_t event, void* param) {
     case ESP_A2D_MEDIA_CTRL_ACK_EVT:
     case BT_APP_MEDIA_START_EVT:
         bt_app_av_media_proc(event, param);
+        break;
+    case BT_APP_AUDIO_INFO_EVT:
+        bt_app_a2d_store_audio_info((const bt_app_audio_info_t*)param);
         break;
     case BT_APP_HEART_BEAT_EVT:
         break;
@@ -367,7 +530,7 @@ static void bt_app_av_state_connected_hdlr(uint16_t event, void* param) {
                      sink_mcc->cie.sbc_info.min_bitpool,
                      sink_mcc->cie.sbc_info.max_bitpool);
         }
-        bt_app_a2d_set_pref_mcc(a2d->a2d_report_snk_codec_caps_stat.conn_hdl, sink_mcc);
+        bt_app_a2d_store_sink_caps(a2d->a2d_report_snk_codec_caps_stat.conn_hdl, sink_mcc);
         break;
     }
     case ESP_A2D_SRC_SET_PREF_MCC_EVT:
@@ -392,6 +555,7 @@ static void bt_app_av_state_disconnecting_hdlr(uint16_t event, void* param) {
         if (a2d->conn_stat.state == ESP_A2D_CONNECTION_STATE_DISCONNECTED) {
             ESP_LOGI(BT_AV_TAG, "a2dp disconnected");
             s_a2d_state = APP_AV_STATE_UNCONNECTED;
+            s_sink_caps_valid = false;
         }
         break;
     case ESP_A2D_AUDIO_STATE_EVT:
@@ -399,6 +563,7 @@ static void bt_app_av_state_disconnecting_hdlr(uint16_t event, void* param) {
     case ESP_A2D_MEDIA_CTRL_ACK_EVT:
     case BT_APP_MEDIA_START_EVT:
     case BT_APP_HEART_BEAT_EVT:
+    case BT_APP_AUDIO_INFO_EVT:
         break;
     case ESP_A2D_REPORT_SNK_DELAY_VALUE_EVT:
         a2d = (esp_a2d_cb_param_t*)(param);

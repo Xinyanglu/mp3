@@ -150,7 +150,6 @@ static int player_simple_event_cb(esp_asp_event_pkt_t* event, void* ctx) {
         .sample_rate     = decode_ctx->info->sample_rate,
         .bits_per_sample = decode_ctx->info->bits_per_sample,
         .channels        = decode_ctx->info->channels,
-        .bitrate         = decode_ctx->info->bitrate,
     };
     esp_err_t ret = bt_app_set_audio_info(&bt_audio_info);
     if (ret != ESP_OK) {
