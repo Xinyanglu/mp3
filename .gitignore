@@ -31,3 +31,4 @@ Thumbs.db
 # Local secrets/config overrides
 *.local
 *.env
+activate.sh
