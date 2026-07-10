@@ -9,6 +9,7 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/stat.h>
 
 #include "bt_app.h"
 #include "esp_audio_simple_player.h"
@@ -23,6 +24,7 @@
 #include "freertos/task.h"
 #include "freertos/stream_buffer.h"
 #include "portmacro.h"
+#include "screen.h"
 
 #define PLAYER_QUEUE_LEN 10
 #define PLAYER_TASK_STACK_SIZE 4096
@@ -36,12 +38,16 @@
 #define PLAYER_PCM_PRIME_BYTES (6 * 1024)
 #define PLAYER_PCM_WRITE_LOG_INTERVAL_BYTES (64 * 1024)
 #define PLAYER_PCM_GAIN_NUMERATOR 1
-#define PLAYER_PCM_GAIN_DENOMINATOR 4
+#define PLAYER_PCM_GAIN_DENOMINATOR 8
 
 static const char* TAG = "player";
 static StreamBufferHandle_t pcm_stream;
 static size_t pcm_total_written;
 static size_t pcm_next_write_log;
+static uint64_t pcm_total_read;
+static uint32_t pcm_bytes_per_second;
+static uint32_t pcm_total_seconds;
+static uint32_t pcm_last_progress_seconds;
 static bool pcm_media_started;
 
 typedef enum {
@@ -55,6 +61,7 @@ typedef struct {
 
 typedef struct {
     player_audio_info_t* info;
+    uint64_t file_size_bytes;
 } player_decode_ctx_t;
 
 static SemaphoreHandle_t player_lock;
@@ -73,6 +80,7 @@ static void player_apply_pcm_gain(uint8_t* data, size_t len);
 static esp_err_t player_build_file_uri(char* uri, size_t uri_size, const char* path);
 static esp_err_t player_gmf_err_to_esp_err(esp_gmf_err_t err);
 static esp_err_t player_decode_file(const char* path, player_audio_info_t* info);
+static uint32_t player_estimate_total_seconds(uint64_t file_size_bytes, uint32_t bitrate);
 
 static int player_simple_out_cb(uint8_t* data, int data_size, void* ctx) {
     player_decode_ctx_t* decode_ctx = (player_decode_ctx_t*)ctx;
@@ -93,9 +101,7 @@ static int player_simple_out_cb(uint8_t* data, int data_size, void* ctx) {
         ESP_LOGI(TAG, "First PCM output callback: %u bytes", (unsigned)data_len);
     }
 
-    if (decode_ctx->info != NULL && decode_ctx->info->bits_per_sample == 16) {
-        player_apply_pcm_gain(data, data_len);
-    }
+    player_apply_pcm_gain(data, data_len);
 
     while (written < data_len) {
         size_t sent = xStreamBufferSend(pcm_stream, data + written, data_len - written, portMAX_DELAY);
@@ -117,6 +123,8 @@ static int player_simple_out_cb(uint8_t* data, int data_size, void* ctx) {
         if (buffered >= PLAYER_PCM_PRIME_BYTES) {
             ESP_LOGI(TAG, "PCM primed: %u buffered, starting A2DP media", (unsigned)buffered);
             pcm_media_started = true;
+            screen_notify_show_song_playing();
+            screen_notify_song_progress(0, pcm_total_seconds);
             bt_app_start_media();
         }
     }
@@ -139,12 +147,17 @@ static int player_simple_event_cb(esp_asp_event_pkt_t* event, void* ctx) {
     decode_ctx->info->channels = music_info.channels;
     decode_ctx->info->bitrate = (uint32_t)music_info.bitrate;
 
+    pcm_bytes_per_second = decode_ctx->info->sample_rate * decode_ctx->info->channels * (decode_ctx->info->bits_per_sample / 8U);
+    pcm_total_seconds = player_estimate_total_seconds(decode_ctx->file_size_bytes, decode_ctx->info->bitrate);
+    pcm_last_progress_seconds = 0;
+
     ESP_LOGI(TAG,
-             "Decoded audio info: %lu Hz, %u bits, %u channel(s), bitrate %lu",
+             "Decoded audio info: %lu Hz, %u bits, %u channel(s), bitrate %lu, estimated duration %lu second(s)",
              decode_ctx->info->sample_rate,
              decode_ctx->info->bits_per_sample,
              decode_ctx->info->channels,
-             decode_ctx->info->bitrate);
+             decode_ctx->info->bitrate,
+             pcm_total_seconds);
 
     bt_app_audio_info_t bt_audio_info = {
         .sample_rate     = decode_ctx->info->sample_rate,
@@ -258,6 +271,7 @@ esp_err_t player_get_status(player_status_t* status) {
 static esp_err_t player_decode_file(const char* path, player_audio_info_t* info) {
     esp_asp_handle_t simple_player = NULL;
     char uri[PLAYER_MAX_FILE_URI_LEN];
+    struct stat st;
     player_decode_ctx_t decode_ctx = {
         .info = info,
     };
@@ -279,6 +293,10 @@ static esp_err_t player_decode_file(const char* path, player_audio_info_t* info)
 
     if (info != NULL) {
         memset(info, 0, sizeof(*info));
+    }
+
+    if (stat(path, &st) == 0 && st.st_size > 0) {
+        decode_ctx.file_size_bytes = (uint64_t)st.st_size;
     }
 
     ret = player_build_file_uri(uri, sizeof(uri), path);
@@ -310,6 +328,7 @@ static esp_err_t player_decode_file(const char* path, player_audio_info_t* info)
 
 int32_t player_read_pcm(uint8_t* data, int32_t len) {
     size_t bytes_read = 0;
+    uint32_t elapsed_seconds;
 
     if (data == NULL || len <= 0) {
         return 0;
@@ -321,6 +340,15 @@ int32_t player_read_pcm(uint8_t* data, int32_t len) {
 
     if (bytes_read < (size_t)len) {
         memset(data + bytes_read, 0, (size_t)len - bytes_read);
+    }
+
+    if (pcm_media_started && pcm_bytes_per_second > 0) {
+        pcm_total_read += (uint32_t)len;
+        elapsed_seconds = (uint32_t)(pcm_total_read / pcm_bytes_per_second);
+        if (elapsed_seconds != pcm_last_progress_seconds) {
+            pcm_last_progress_seconds = elapsed_seconds;
+            screen_notify_song_progress(elapsed_seconds, pcm_total_seconds);
+        }
     }
 
     return len;
@@ -383,7 +411,11 @@ static void player_handle_play(const char* path) {
         xStreamBufferReset(pcm_stream);
     }
     pcm_total_written = 0;
+    pcm_total_read = 0;
     pcm_next_write_log = 0;
+    pcm_bytes_per_second = 0;
+    pcm_total_seconds = 0;
+    pcm_last_progress_seconds = 0;
     pcm_media_started = false;
 
     ESP_LOGI(TAG, "Playing song: %s", play_path);
@@ -397,6 +429,19 @@ static void player_handle_play(const char* path) {
     player_status.state = ret == ESP_OK ? PLAYER_STATE_STOPPED : PLAYER_STATE_ERROR;
 
     xSemaphoreGive(player_lock);
+}
+
+static uint32_t player_estimate_total_seconds(uint64_t file_size_bytes, uint32_t bitrate_kbps) {
+    uint64_t total_bits;
+    uint32_t bitrate_bps;
+
+    if (file_size_bytes == 0 || bitrate_kbps == 0) {
+        return 0;
+    }
+
+    bitrate_bps = bitrate_kbps * 1000U;
+    total_bits = file_size_bytes * 8U;
+    return (uint32_t)((total_bits + bitrate_bps - 1U) / bitrate_bps);
 }
 
 static void player_apply_pcm_gain(uint8_t* data, size_t len) {

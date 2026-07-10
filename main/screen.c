@@ -7,7 +7,9 @@
 #include "screen.h"
 
 #include <stdbool.h>
+#include <stdio.h>
 #include <stdint.h>
+#include <string.h>
 
 #include "bt_app.h"
 #include "driver/gpio.h"
@@ -68,6 +70,8 @@ static int selected_bt_device_idx = -1;
 static int selected_song_idx      = -1;
 static esp_timer_handle_t bt_scan_refresh_timer;
 static screen_state current_screen = SCREEN_STATE_BT_DISCOVERY;
+static lv_obj_t* song_progress_bar;
+static lv_obj_t* song_progress_time_label;
 
 static esp_err_t init_lcd(void);
 static esp_err_t init_lvgl(void);
@@ -85,6 +89,9 @@ static int find_next_bt_device(int start_idx);
 static int find_prev_bt_device(int start_idx);
 static void screen_show_song_selection(void);
 static void screen_show_song_loading(void);
+static void screen_show_song_playing(void);
+static void screen_update_song_progress(uint32_t elapsed_seconds, uint32_t total_seconds);
+static void screen_format_time(char* buf, size_t buf_size, uint32_t seconds);
 
 static QueueHandle_t screen_event_queue = NULL;
 static TaskHandle_t screen_task_handle  = NULL;
@@ -197,6 +204,15 @@ static void screen_task_handler(void* arg __attribute__((unused))) {
                 screen_show_song_selection();
                 break;
 
+            case SCREEN_EVT_SONG_PLAYING:
+                current_screen = SCREEN_STATE_SONG_PLAYING;
+                screen_show_song_playing();
+                break;
+
+            case SCREEN_EVT_SONG_PROGRESS:
+                screen_update_song_progress(msg.elapsed_seconds, msg.total_seconds);
+                break;
+
             default:
                 ESP_LOGW(TAG, "%s, unhandled event: %d", __func__, msg.event);
                 break;
@@ -262,6 +278,20 @@ void screen_notify_button_press(screen_button button) {
 
 void screen_notify_show_song_selection(void) {
     screen_msg msg = {.event = SCREEN_EVT_BT_DEVICE_CONNECTED};
+    xQueueSend(screen_event_queue, &msg, 0);
+}
+
+void screen_notify_show_song_playing(void) {
+    screen_msg msg = {.event = SCREEN_EVT_SONG_PLAYING};
+    xQueueSend(screen_event_queue, &msg, 0);
+}
+
+void screen_notify_song_progress(uint32_t elapsed_seconds, uint32_t total_seconds) {
+    screen_msg msg = {
+        .event = SCREEN_EVT_SONG_PROGRESS,
+        .elapsed_seconds = elapsed_seconds,
+        .total_seconds = total_seconds,
+    };
     xQueueSend(screen_event_queue, &msg, 0);
 }
 
@@ -377,6 +407,7 @@ static esp_err_t screen_handle_btn_press(screen_button button) {
     case SCREEN_STATE_SONG_SELECT:
         return screen_handle_song_select_btn_press(button);
     case SCREEN_STATE_SONG_LOADING:
+    case SCREEN_STATE_SONG_PLAYING:
     default:
         return ESP_OK;
     }
@@ -447,6 +478,8 @@ static void screen_show_bt_scan(void) {
     if (lvgl_port_lock(0)) {
         lv_obj_t* screen = lv_screen_active();
         lv_obj_clean(screen);
+        song_progress_bar = NULL;
+        song_progress_time_label = NULL;
         lv_obj_set_style_bg_color(screen, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
         lv_obj_set_style_bg_opa(screen, LV_OPA_COVER, LV_PART_MAIN);
 
@@ -509,6 +542,8 @@ static void screen_show_song_selection(void) {
     if (lvgl_port_lock(0)) {
         lv_obj_t* screen = lv_screen_active();
         lv_obj_clean(screen);
+        song_progress_bar = NULL;
+        song_progress_time_label = NULL;
         lv_obj_set_style_bg_color(screen, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
         lv_obj_set_style_bg_opa(screen, LV_OPA_COVER, LV_PART_MAIN);
 
@@ -562,6 +597,8 @@ static void screen_show_song_loading(void) {
     if (lvgl_port_lock(0)) {
         lv_obj_t* screen = lv_screen_active();
         lv_obj_clean(screen);
+        song_progress_bar = NULL;
+        song_progress_time_label = NULL;
         lv_obj_set_style_bg_color(screen, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
         lv_obj_set_style_bg_opa(screen, LV_OPA_COVER, LV_PART_MAIN);
 
@@ -579,4 +616,91 @@ static void screen_show_song_loading(void) {
 
         lvgl_port_unlock();
     }
+}
+
+static void screen_show_song_playing(void) {
+    const sdcard_song_t* song = NULL;
+
+    if (selected_song_idx >= 0) {
+        song = sdcard_get_song((size_t)selected_song_idx);
+    }
+
+    if (lvgl_port_lock(0)) {
+        lv_obj_t* screen = lv_screen_active();
+        lv_obj_clean(screen);
+        lv_obj_set_style_bg_color(screen, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
+        lv_obj_set_style_bg_opa(screen, LV_OPA_COVER, LV_PART_MAIN);
+
+        lv_obj_t* title = lv_label_create(screen);
+        lv_label_set_text(title, "Now playing");
+        lv_obj_set_style_text_color(title, lv_color_hex(0x202020), LV_PART_MAIN);
+        lv_obj_align(title, LV_ALIGN_TOP_LEFT, 12, 12);
+
+        lv_obj_t* song_label = lv_label_create(screen);
+        lv_obj_set_width(song_label, LCD_H_RES - 24);
+        lv_label_set_long_mode(song_label, LV_LABEL_LONG_DOT);
+        lv_label_set_text(song_label, song != NULL ? song->name : "Selected song");
+        lv_obj_set_style_text_color(song_label, lv_color_hex(0x202020), LV_PART_MAIN);
+        lv_obj_align(song_label, LV_ALIGN_TOP_LEFT, 12, 44);
+
+        song_progress_bar = lv_bar_create(screen);
+        lv_obj_set_size(song_progress_bar, LCD_H_RES - 24, 16);
+        lv_bar_set_range(song_progress_bar, 0, 100);
+        lv_bar_set_value(song_progress_bar, 0, LV_ANIM_OFF);
+        lv_obj_set_style_bg_color(song_progress_bar, lv_color_hex(0xE0E0E0), LV_PART_MAIN);
+        lv_obj_set_style_bg_opa(song_progress_bar, LV_OPA_COVER, LV_PART_MAIN);
+        lv_obj_set_style_bg_color(song_progress_bar, lv_color_hex(0x202020), LV_PART_INDICATOR);
+        lv_obj_set_style_bg_opa(song_progress_bar, LV_OPA_COVER, LV_PART_INDICATOR);
+        lv_obj_align(song_progress_bar, LV_ALIGN_TOP_LEFT, 12, 84);
+
+        song_progress_time_label = lv_label_create(screen);
+        lv_label_set_text(song_progress_time_label, "0:00 / --:--");
+        lv_obj_set_style_text_color(song_progress_time_label, lv_color_hex(0x666666), LV_PART_MAIN);
+        lv_obj_align(song_progress_time_label, LV_ALIGN_TOP_LEFT, 12, 108);
+
+        lvgl_port_unlock();
+    }
+}
+
+static void screen_update_song_progress(uint32_t elapsed_seconds, uint32_t total_seconds) {
+    char elapsed[12];
+    char total[12];
+    char progress_text[32];
+    int progress = 0;
+
+    if (current_screen != SCREEN_STATE_SONG_PLAYING) {
+        return;
+    }
+
+    if (total_seconds > 0) {
+        if (elapsed_seconds > total_seconds) {
+            elapsed_seconds = total_seconds;
+        }
+        progress = (int)((elapsed_seconds * 100U) / total_seconds);
+    }
+
+    screen_format_time(elapsed, sizeof(elapsed), elapsed_seconds);
+    if (total_seconds > 0) {
+        screen_format_time(total, sizeof(total), total_seconds);
+    } else {
+        strlcpy(total, "--:--", sizeof(total));
+    }
+    snprintf(progress_text, sizeof(progress_text), "%s / %s", elapsed, total);
+
+    if (lvgl_port_lock(0)) {
+        if (song_progress_bar != NULL) {
+            lv_bar_set_value(song_progress_bar, progress, LV_ANIM_OFF);
+        }
+        if (song_progress_time_label != NULL) {
+            lv_label_set_text(song_progress_time_label, progress_text);
+        }
+        lvgl_port_unlock();
+    }
+}
+
+static void screen_format_time(char* buf, size_t buf_size, uint32_t seconds) {
+    uint32_t minutes = seconds / 60U;
+    uint32_t rem_seconds = seconds % 60U;
+
+    snprintf(buf, buf_size, "%lu:%02lu", (unsigned long)minutes, (unsigned long)rem_seconds);
 }
