@@ -20,7 +20,6 @@
 #include "freertos/idf_additions.h"
 #include "freertos/projdefs.h"
 #include "freertos/queue.h"
-#include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "freertos/stream_buffer.h"
 #include "portmacro.h"
@@ -52,6 +51,9 @@ static bool pcm_media_started;
 
 typedef enum {
     PLAYER_EVT_PLAY,
+    PLAYER_EVT_PAUSE,
+    PLAYER_EVT_RESUME,
+    PLAYER_EVT_FINISHED,
 } player_event_t;
 
 typedef struct {
@@ -64,22 +66,27 @@ typedef struct {
     uint64_t file_size_bytes;
 } player_decode_ctx_t;
 
-static SemaphoreHandle_t player_lock;
 static QueueHandle_t player_queue;
 static TaskHandle_t player_task_handle;
-static player_status_t player_status = {
-    .state      = PLAYER_STATE_STOPPED,
-    .path       = "",
-    .last_error = ESP_OK,
+static esp_asp_handle_t active_simple_player;
+static player_audio_info_t active_audio_info;
+static player_decode_ctx_t active_decode_ctx = {
+    .info = &active_audio_info,
 };
 
 static void player_task_handler(void* arg);
 static esp_err_t player_send_msg(const player_msg_t* msg);
 static void player_handle_play(const char* path);
+static void player_handle_pause(void);
+static void player_handle_resume(void);
+static void player_handle_finished(void);
+static void player_clear_pending_events(void);
+static void player_reset_pcm_state(void);
+static void player_destroy_active(bool stop_first);
 static void player_apply_pcm_gain(uint8_t* data, size_t len);
 static esp_err_t player_build_file_uri(char* uri, size_t uri_size, const char* path);
 static esp_err_t player_gmf_err_to_esp_err(esp_gmf_err_t err);
-static esp_err_t player_decode_file(const char* path, player_audio_info_t* info);
+static esp_err_t player_start_file(const char* path);
 static uint32_t player_estimate_total_seconds(uint64_t file_size_bytes, uint32_t bitrate);
 
 static int player_simple_out_cb(uint8_t* data, int data_size, void* ctx) {
@@ -135,9 +142,32 @@ static int player_simple_out_cb(uint8_t* data, int data_size, void* ctx) {
 static int player_simple_event_cb(esp_asp_event_pkt_t* event, void* ctx) {
     player_decode_ctx_t* decode_ctx = (player_decode_ctx_t*)ctx;
     esp_asp_music_info_t music_info = {0};
+    esp_asp_state_t state;
 
-    if (decode_ctx == NULL || event == NULL || event->type != ESP_ASP_EVENT_TYPE_MUSIC_INFO || decode_ctx->info == NULL ||
-        event->payload == NULL || event->payload_size < (int)sizeof(music_info)) {
+    if (decode_ctx == NULL || event == NULL) {
+        return 0;
+    }
+
+    if (event->type == ESP_ASP_EVENT_TYPE_STATE) {
+        if (event->payload == NULL || event->payload_size < (int)sizeof(state)) {
+            return 0;
+        }
+
+        memcpy(&state, event->payload, sizeof(state));
+        ESP_LOGI(TAG, "Simple player state: %s", esp_audio_simple_player_state_to_str(state));
+        if (state == ESP_ASP_STATE_FINISHED) {
+            player_msg_t msg = {
+                .event = PLAYER_EVT_FINISHED,
+            };
+            if (player_send_msg(&msg) != ESP_OK) {
+                ESP_LOGW(TAG, "Failed to enqueue player finished event");
+            }
+        }
+        return 0;
+    }
+
+    if (event->type != ESP_ASP_EVENT_TYPE_MUSIC_INFO || decode_ctx->info == NULL || event->payload == NULL ||
+        event->payload_size < (int)sizeof(music_info)) {
         return 0;
     }
 
@@ -173,17 +203,12 @@ static int player_simple_event_cb(esp_asp_event_pkt_t* event, void* ctx) {
 }
 
 esp_err_t player_init(void) {
-    if (player_lock != NULL) {
+    if (player_queue != NULL) {
         return ESP_OK;
     }
 
-    player_lock = xSemaphoreCreateMutex();
-    ESP_RETURN_ON_FALSE(player_lock != NULL, ESP_ERR_NO_MEM, TAG, "Player mutex create failed");
-
     player_queue = xQueueCreate(PLAYER_QUEUE_LEN, sizeof(player_msg_t));
     if (player_queue == NULL) {
-        vSemaphoreDelete(player_lock);
-        player_lock = NULL;
         return ESP_ERR_NO_MEM;
     }
 
@@ -191,8 +216,6 @@ esp_err_t player_init(void) {
     if (pcm_stream == NULL) {
         vQueueDelete(player_queue);
         player_queue = NULL;
-        vSemaphoreDelete(player_lock);
-        player_lock = NULL;
         return ESP_ERR_NO_MEM;
     }
 
@@ -203,8 +226,6 @@ esp_err_t player_init(void) {
         pcm_stream = NULL;
         vQueueDelete(player_queue);
         player_queue = NULL;
-        vSemaphoreDelete(player_lock);
-        player_lock = NULL;
         return ESP_ERR_NO_MEM;
     }
 
@@ -216,7 +237,6 @@ esp_err_t player_play(size_t song_idx) {
         .event = PLAYER_EVT_PLAY,
     };
 
-    ESP_RETURN_ON_FALSE(player_lock != NULL, ESP_ERR_INVALID_STATE, TAG, "Player not initialized");
     ESP_RETURN_ON_FALSE(player_queue != NULL, ESP_ERR_INVALID_STATE, TAG, "Player queue not initialized");
 
     ESP_RETURN_ON_ERROR(sdcard_get_song_path(song_idx, msg.path, sizeof(msg.path)), TAG, "Invalid song path");
@@ -225,59 +245,32 @@ esp_err_t player_play(size_t song_idx) {
 }
 
 esp_err_t player_pause(void) {
-    ESP_RETURN_ON_FALSE(player_lock != NULL, ESP_ERR_INVALID_STATE, TAG, "Player not initialized");
+    player_msg_t msg = {
+        .event = PLAYER_EVT_PAUSE,
+    };
 
-    if (xSemaphoreTake(player_lock, portMAX_DELAY) != pdTRUE) {
-        return ESP_FAIL;
-    }
+    ESP_RETURN_ON_FALSE(player_queue != NULL, ESP_ERR_INVALID_STATE, TAG, "Player queue not initialized");
 
-    if (player_status.state == PLAYER_STATE_PLAYING) {
-        player_status.state = PLAYER_STATE_PAUSED;
-    }
-
-    xSemaphoreGive(player_lock);
-    return ESP_OK;
+    return player_send_msg(&msg);
 }
 
-esp_err_t player_stop(void) {
-    ESP_RETURN_ON_FALSE(player_lock != NULL, ESP_ERR_INVALID_STATE, TAG, "Player not initialized");
+esp_err_t player_resume(void) {
+    player_msg_t msg = {
+        .event = PLAYER_EVT_RESUME,
+    };
 
-    if (xSemaphoreTake(player_lock, portMAX_DELAY) != pdTRUE) {
-        return ESP_FAIL;
-    }
+    ESP_RETURN_ON_FALSE(player_queue != NULL, ESP_ERR_INVALID_STATE, TAG, "Player queue not initialized");
 
-    player_status.state      = PLAYER_STATE_STOPPED;
-    player_status.path[0]    = '\0';
-    player_status.last_error = ESP_OK;
-
-    xSemaphoreGive(player_lock);
-    return ESP_OK;
+    return player_send_msg(&msg);
 }
 
-esp_err_t player_get_status(player_status_t* status) {
-    ESP_RETURN_ON_FALSE(status != NULL, ESP_ERR_INVALID_ARG, TAG, "Invalid status pointer");
-    ESP_RETURN_ON_FALSE(player_lock != NULL, ESP_ERR_INVALID_STATE, TAG, "Player not initialized");
-
-    if (xSemaphoreTake(player_lock, portMAX_DELAY) != pdTRUE) {
-        return ESP_FAIL;
-    }
-
-    *status = player_status;
-
-    xSemaphoreGive(player_lock);
-    return ESP_OK;
-}
-
-static esp_err_t player_decode_file(const char* path, player_audio_info_t* info) {
+static esp_err_t player_start_file(const char* path) {
     esp_asp_handle_t simple_player = NULL;
     char uri[PLAYER_MAX_FILE_URI_LEN];
     struct stat st;
-    player_decode_ctx_t decode_ctx = {
-        .info = info,
-    };
     esp_asp_cfg_t player_cfg = {
         .out.cb = player_simple_out_cb,
-        .out.user_ctx = &decode_ctx,
+        .out.user_ctx = &active_decode_ctx,
         .task_prio = PLAYER_SIMPLE_TASK_PRIORITY,
         .task_stack = PLAYER_SIMPLE_TASK_STACK_SIZE,
         .task_core = PLAYER_SIMPLE_TASK_CORE,
@@ -291,12 +284,12 @@ static esp_err_t player_decode_file(const char* path, player_audio_info_t* info)
         return ESP_ERR_INVALID_ARG;
     }
 
-    if (info != NULL) {
-        memset(info, 0, sizeof(*info));
-    }
+    player_destroy_active(true);
+    memset(&active_audio_info, 0, sizeof(active_audio_info));
+    active_decode_ctx.file_size_bytes = 0;
 
     if (stat(path, &st) == 0 && st.st_size > 0) {
-        decode_ctx.file_size_bytes = (uint64_t)st.st_size;
+        active_decode_ctx.file_size_bytes = (uint64_t)st.st_size;
     }
 
     ret = player_build_file_uri(uri, sizeof(uri), path);
@@ -309,19 +302,21 @@ static esp_err_t player_decode_file(const char* path, player_audio_info_t* info)
         return player_gmf_err_to_esp_err(gmf_ret);
     }
 
-    gmf_ret = esp_audio_simple_player_set_event(simple_player, player_simple_event_cb, &decode_ctx);
+    gmf_ret = esp_audio_simple_player_set_event(simple_player, player_simple_event_cb, &active_decode_ctx);
     if (gmf_ret == ESP_GMF_ERR_OK) {
-        gmf_ret = esp_audio_simple_player_run_to_end(simple_player, uri, NULL);
+        gmf_ret = esp_audio_simple_player_run(simple_player, uri, NULL);
     }
 
     if (gmf_ret != ESP_GMF_ERR_OK) {
         ret = player_gmf_err_to_esp_err(gmf_ret);
+        destroy_ret = esp_audio_simple_player_destroy(simple_player);
+        if (ret == ESP_OK && destroy_ret != ESP_GMF_ERR_OK) {
+            ret = player_gmf_err_to_esp_err(destroy_ret);
+        }
+        return ret;
     }
 
-    destroy_ret = esp_audio_simple_player_destroy(simple_player);
-    if (ret == ESP_OK && destroy_ret != ESP_GMF_ERR_OK) {
-        ret = player_gmf_err_to_esp_err(destroy_ret);
-    }
+    active_simple_player = simple_player;
 
     return ret;
 }
@@ -342,8 +337,8 @@ int32_t player_read_pcm(uint8_t* data, int32_t len) {
         memset(data + bytes_read, 0, (size_t)len - bytes_read);
     }
 
-    if (pcm_media_started && pcm_bytes_per_second > 0) {
-        pcm_total_read += (uint32_t)len;
+    if (pcm_media_started && pcm_bytes_per_second > 0 && bytes_read > 0) {
+        pcm_total_read += bytes_read;
         elapsed_seconds = (uint32_t)(pcm_total_read / pcm_bytes_per_second);
         if (elapsed_seconds != pcm_last_progress_seconds) {
             pcm_last_progress_seconds = elapsed_seconds;
@@ -365,6 +360,15 @@ static void player_task_handler(void* arg __attribute__((unused))) {
         switch (msg.event) {
         case PLAYER_EVT_PLAY:
             player_handle_play(msg.path);
+            break;
+        case PLAYER_EVT_PAUSE:
+            player_handle_pause();
+            break;
+        case PLAYER_EVT_RESUME:
+            player_handle_resume();
+            break;
+        case PLAYER_EVT_FINISHED:
+            player_handle_finished();
             break;
         default:
             ESP_LOGW(TAG, "Unhandled player event: %d", msg.event);
@@ -388,7 +392,6 @@ static esp_err_t player_send_msg(const player_msg_t* msg) {
 
 static void player_handle_play(const char* path) {
     char play_path[SDCARD_MAX_PATH_LEN];
-    player_audio_info_t audio_info = {0};
     esp_err_t ret;
 
     if (path == NULL || path[0] == '\0') {
@@ -397,16 +400,57 @@ static void player_handle_play(const char* path) {
 
     strlcpy(play_path, path, sizeof(play_path));
 
-    if (xSemaphoreTake(player_lock, portMAX_DELAY) != pdTRUE) {
+    player_reset_pcm_state();
+
+    ESP_LOGI(TAG, "Playing song: %s", play_path);
+    ret = player_start_file(play_path);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to play song %s: %s", play_path, esp_err_to_name(ret));
+    }
+}
+
+static void player_handle_pause(void) {
+    esp_gmf_err_t gmf_ret;
+
+    if (active_simple_player == NULL) {
+        ESP_LOGW(TAG, "Cannot pause; no active player");
         return;
     }
 
-    strlcpy(player_status.path, play_path, sizeof(player_status.path));
-    player_status.state      = PLAYER_STATE_PLAYING;
-    player_status.last_error = ESP_OK;
+    gmf_ret = esp_audio_simple_player_pause(active_simple_player);
+    if (gmf_ret != ESP_GMF_ERR_OK) {
+        ESP_LOGW(TAG, "Failed to pause player: %s", esp_err_to_name(player_gmf_err_to_esp_err(gmf_ret)));
+    }
+}
 
-    xSemaphoreGive(player_lock);
+static void player_handle_resume(void) {
+    esp_gmf_err_t gmf_ret;
 
+    if (active_simple_player == NULL) {
+        ESP_LOGW(TAG, "Cannot resume; no active player");
+        return;
+    }
+
+    gmf_ret = esp_audio_simple_player_resume(active_simple_player);
+    if (gmf_ret != ESP_GMF_ERR_OK) {
+        ESP_LOGW(TAG, "Failed to resume player: %s", esp_err_to_name(player_gmf_err_to_esp_err(gmf_ret)));
+    }
+}
+
+static void player_handle_finished(void) {
+    player_clear_pending_events();
+    player_destroy_active(false);
+    player_reset_pcm_state();
+    screen_notify_show_song_selection();
+}
+
+static void player_clear_pending_events(void) {
+    if (player_queue != NULL) {
+        xQueueReset(player_queue);
+    }
+}
+
+static void player_reset_pcm_state(void) {
     if (pcm_stream != NULL) {
         xStreamBufferReset(pcm_stream);
     }
@@ -417,18 +461,23 @@ static void player_handle_play(const char* path) {
     pcm_total_seconds = 0;
     pcm_last_progress_seconds = 0;
     pcm_media_started = false;
+}
 
-    ESP_LOGI(TAG, "Playing song: %s", play_path);
-    ret = player_decode_file(play_path, &audio_info);
+static void player_destroy_active(bool stop_first) {
+    esp_gmf_err_t gmf_ret;
 
-    if (xSemaphoreTake(player_lock, portMAX_DELAY) != pdTRUE) {
+    if (active_simple_player == NULL) {
         return;
     }
 
-    player_status.last_error = ret;
-    player_status.state = ret == ESP_OK ? PLAYER_STATE_STOPPED : PLAYER_STATE_ERROR;
-
-    xSemaphoreGive(player_lock);
+    if (stop_first) {
+        (void)esp_audio_simple_player_stop(active_simple_player);
+    }
+    gmf_ret = esp_audio_simple_player_destroy(active_simple_player);
+    if (gmf_ret != ESP_GMF_ERR_OK) {
+        ESP_LOGW(TAG, "Failed to destroy active player: %s", esp_err_to_name(player_gmf_err_to_esp_err(gmf_ret)));
+    }
+    active_simple_player = NULL;
 }
 
 static uint32_t player_estimate_total_seconds(uint64_t file_size_bytes, uint32_t bitrate_kbps) {

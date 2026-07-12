@@ -12,11 +12,26 @@
 #include <strings.h>
 #include <sys/stat.h>
 
+#include "driver/gpio.h"
+#include "driver/spi_master.h"
 #include "driver/sdspi_host.h"
 #include "esp_err.h"
 #include "esp_log.h"
 #include "esp_vfs_fat.h"
 #include "sdmmc_cmd.h"
+
+typedef struct {
+    const char* mount_path;
+    spi_host_device_t host;
+    gpio_num_t gpio_miso;
+    gpio_num_t gpio_mosi;
+    gpio_num_t gpio_sclk;
+    gpio_num_t gpio_cs;
+    int max_files;
+    bool format_if_mount_failed;
+    int max_freq_khz;
+    int max_transfer_sz;
+} sdcard_config_t;
 
 static const char* TAG = "sdcard";
 
@@ -26,7 +41,6 @@ static size_t song_count;
 static sdmmc_card_t* sd_card;
 static bool sdcard_mounted;
 static bool sdcard_initialized;
-static spi_host_device_t sdcard_host = SPI3_HOST;
 static sdcard_config_t sdcard_default_config = {
     .mount_path             = ROOT_PATH,
     .host                   = SPI3_HOST,
@@ -40,6 +54,7 @@ static sdcard_config_t sdcard_default_config = {
     .max_transfer_sz        = 4000,
 };
 
+static esp_err_t sdcard_mount(void);
 static bool sdcard_has_mp3_extension(const char* name);
 static esp_err_t sdcard_build_path(char* path, size_t path_size, const char* name);
 static bool sdcard_is_regular_file(const char* path, struct stat* st);
@@ -61,7 +76,7 @@ esp_err_t sdcard_init(void) {
     return ESP_OK;
 }
 
-esp_err_t sdcard_mount(void) {
+static esp_err_t sdcard_mount(void) {
     esp_err_t ret;
     const char* mount_path = sdcard_default_config.mount_path;
     sdmmc_host_t host      = SDSPI_HOST_DEFAULT();
@@ -110,32 +125,6 @@ esp_err_t sdcard_mount(void) {
     sdcard_mounted = true;
     sdmmc_card_print_info(stdout, sd_card);
     return ESP_OK;
-}
-
-esp_err_t sdcard_unmount(void) {
-    esp_err_t ret;
-
-    if (!sdcard_mounted) {
-        return ESP_ERR_INVALID_STATE;
-    }
-
-    ret = esp_vfs_fat_sdcard_unmount(sdcard_default_config.mount_path, sd_card);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to unmount SD card: %s", esp_err_to_name(ret));
-        return ret;
-    }
-
-    ret = spi_bus_free(sdcard_host);
-
-    sd_card           = NULL;
-    sdcard_mounted    = false;
-    sdcard_initialized = false;
-    song_count        = 0;
-
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to free SD SPI bus: %s", esp_err_to_name(ret));
-    }
-    return ret;
 }
 
 esp_err_t sdcard_scan_songs(void) {
