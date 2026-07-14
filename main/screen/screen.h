@@ -11,8 +11,10 @@ typedef enum {
     SCREEN_EVT_BT_DEVICE_FOUND,
     SCREEN_EVT_BTN_PRESS,
     SCREEN_EVT_BT_DEVICE_CONNECTED,
+    SCREEN_EVT_BT_DEVICE_DISCONNECTED,
     SCREEN_EVT_SONG_PLAYING,
     SCREEN_EVT_SONG_PROGRESS,
+    SCREEN_EVT_SONG_FINISHED,
 } screen_event;
 
 typedef enum {
@@ -45,6 +47,8 @@ esp_err_t screen_init(void);
 void screen_notify_bt_device_found(const char* device_name, esp_bd_addr_t bda);
 void screen_notify_bt_refresh(void* arg);
 void screen_notify_button_press(screen_button button);
+void screen_notify_show_bt_discovery(void);
 void screen_notify_show_song_selection(void);
 void screen_notify_show_song_playing(void);
 void screen_notify_song_progress(uint32_t elapsed_seconds, uint32_t total_seconds);
+void screen_notify_song_finished(void);

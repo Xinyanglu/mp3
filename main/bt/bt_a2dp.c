@@ -27,6 +27,7 @@ static void bt_app_a2d_store_audio_info(const bt_app_audio_info_t* info);
 static void bt_app_a2d_set_pref_mcc(esp_a2d_conn_hdl_t conn_hdl,
                                     const esp_a2d_mcc_t* sink_caps,
                                     const bt_app_audio_info_t* audio_info);
+static void bt_app_a2d_handle_disconnected(void);
 static void bt_app_av_state_unconnected_hdlr(uint16_t event, void* param);
 static void bt_app_av_state_connecting_hdlr(uint16_t event, void* param);
 static void bt_app_av_state_connected_hdlr(uint16_t event, void* param);
@@ -349,6 +350,19 @@ static void bt_app_a2d_set_pref_mcc(esp_a2d_conn_hdl_t conn_hdl,
     bt_log_leave(__func__);
 }
 
+static void bt_app_a2d_handle_disconnected(void) {
+    s_media_state = APP_AV_MEDIA_STATE_IDLE;
+    s_sink_caps_valid = false;
+    player_clear();
+    screen_notify_show_bt_discovery();
+
+    s_a2d_state = APP_AV_STATE_DISCOVERING;
+    esp_err_t ret = esp_bt_gap_start_discovery(ESP_BT_INQ_MODE_GENERAL_INQUIRY, 10, 0);
+    if (ret != ESP_OK) {
+        ESP_LOGW(BT_AV_TAG, "Failed to restart device discovery after disconnect: %s", esp_err_to_name(ret));
+    }
+}
+
 static void bt_app_av_state_unconnected_hdlr(uint16_t event, void* param) {
     bt_log_enter(__func__);
     esp_a2d_cb_param_t* a2d = NULL;
@@ -400,8 +414,7 @@ static void bt_app_av_state_connecting_hdlr(uint16_t event, void* param) {
             s_media_state = APP_AV_MEDIA_STATE_IDLE;
             screen_notify_show_song_selection();
         } else if (a2d->conn_stat.state == ESP_A2D_CONNECTION_STATE_DISCONNECTED) {
-            s_a2d_state = APP_AV_STATE_UNCONNECTED;
-            s_sink_caps_valid = false;
+            bt_app_a2d_handle_disconnected();
         }
         break;
     case ESP_A2D_AUDIO_STATE_EVT:
@@ -490,8 +503,7 @@ static void bt_app_av_state_connected_hdlr(uint16_t event, void* param) {
         a2d = (esp_a2d_cb_param_t*)(param);
         if (a2d->conn_stat.state == ESP_A2D_CONNECTION_STATE_DISCONNECTED) {
             ESP_LOGI(BT_AV_TAG, "a2dp disconnected");
-            s_a2d_state = APP_AV_STATE_UNCONNECTED;
-            s_sink_caps_valid = false;
+            bt_app_a2d_handle_disconnected();
         }
         break;
     case ESP_A2D_AUDIO_STATE_EVT:
@@ -554,8 +566,7 @@ static void bt_app_av_state_disconnecting_hdlr(uint16_t event, void* param) {
         a2d = (esp_a2d_cb_param_t*)(param);
         if (a2d->conn_stat.state == ESP_A2D_CONNECTION_STATE_DISCONNECTED) {
             ESP_LOGI(BT_AV_TAG, "a2dp disconnected");
-            s_a2d_state = APP_AV_STATE_UNCONNECTED;
-            s_sink_caps_valid = false;
+            bt_app_a2d_handle_disconnected();
         }
         break;
     case ESP_A2D_AUDIO_STATE_EVT:

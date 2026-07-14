@@ -15,6 +15,7 @@
 #include "driver/gpio.h"
 #include "driver/spi_master.h"
 #include "driver/sdspi_host.h"
+#include "esp_check.h"
 #include "esp_err.h"
 #include "esp_log.h"
 #include "esp_vfs_fat.h"
@@ -38,6 +39,10 @@ static const char* TAG = "sdcard";
 static char ROOT_PATH[SDCARD_MAX_PATH_LEN] = "/sdcard";
 static sdcard_song_t songs[SDCARD_MAX_SONGS];
 static size_t song_count;
+static size_t total_song_count;
+static size_t song_page;
+static size_t total_song_pages;
+static bool song_page_has_next;
 static sdmmc_card_t* sd_card;
 static bool sdcard_mounted;
 static bool sdcard_initialized;
@@ -59,18 +64,17 @@ static bool sdcard_has_mp3_extension(const char* name);
 static esp_err_t sdcard_build_path(char* path, size_t path_size, const char* name);
 static bool sdcard_is_regular_file(const char* path, struct stat* st);
 static esp_err_t sdcard_add_song(const char* name);
+static bool sdcard_is_song_file(const char* name);
+static esp_err_t sdcard_scan_song_totals(void);
 
 esp_err_t sdcard_init(void) {
-    esp_err_t mount_ret;
-
     if (sdcard_initialized) {
         return ESP_OK;
     }
 
-    mount_ret = sdcard_mount();
-    if (mount_ret != ESP_OK) {
-        return mount_ret;
-    }
+    ESP_RETURN_ON_ERROR(sdcard_mount(), TAG, "Failed to mount SD card");
+    ESP_RETURN_ON_ERROR(sdcard_scan_song_totals(), TAG, "Failed to scan song totals");
+    ESP_RETURN_ON_ERROR(sdcard_load_song_page(0), TAG, "Failed to load first song page");
 
     sdcard_initialized = true;
     return ESP_OK;
@@ -127,10 +131,21 @@ static esp_err_t sdcard_mount(void) {
     return ESP_OK;
 }
 
-esp_err_t sdcard_scan_songs(void) {
+esp_err_t sdcard_load_song_page(size_t page_index) {
     DIR* dir;
-    struct dirent* entry;
-    song_count        = 0;
+    size_t page_start;
+    size_t page_end;
+    size_t valid_song_idx = 0;
+
+    if ((page_index >= total_song_pages)) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    page_start = page_index * SDCARD_MAX_SONGS;
+    page_end = page_start + SDCARD_MAX_SONGS;
+    song_count = 0;
+    song_page = page_index;
+    song_page_has_next = page_index + 1 < total_song_pages;
 
     dir = opendir(ROOT_PATH);
     if (dir == NULL) {
@@ -138,23 +153,57 @@ esp_err_t sdcard_scan_songs(void) {
         return ESP_FAIL;
     }
 
-    while ((entry = readdir(dir)) != NULL) {
+    for (struct dirent* entry = readdir(dir); entry != NULL; entry = readdir(dir)) {
         ESP_LOGI(TAG, "SD card entry: %s", entry->d_name);
 
-        esp_err_t ret = sdcard_add_song(entry->d_name);
-        if (ret == ESP_ERR_NO_MEM) {
-            ESP_LOGW(TAG, "Song list full; ignoring remaining files");
-            break;
+        if (!sdcard_is_song_file(entry->d_name)) {
+            continue;
         }
+
+        if (valid_song_idx >= page_end) {
+            break;
+        } else if (valid_song_idx >= page_start) {
+            esp_err_t ret = sdcard_add_song(entry->d_name);
+            if (ret != ESP_OK) {
+                ESP_LOGW(TAG, "Failed to add song %s to page: %s", entry->d_name, esp_err_to_name(ret));
+            }
+        }
+        valid_song_idx++;
     }
 
     closedir(dir);
-    ESP_LOGI(TAG, "Found %u MP3 song(s)", (unsigned int)song_count);
+    ESP_LOGI(TAG,
+             "Loaded song page %u/%u: %u MP3 song(s), total=%u, has_next=%s",
+             (unsigned int)song_page,
+             (unsigned int)total_song_pages,
+             (unsigned int)song_count,
+             (unsigned int)total_song_count,
+             song_page_has_next ? "true" : "false");
     return ESP_OK;
 }
 
 size_t sdcard_get_song_count(void) {
     return song_count;
+}
+
+size_t sdcard_get_total_song_count(void) {
+    return total_song_count;
+}
+
+size_t sdcard_get_song_page(void) {
+    return song_page;
+}
+
+size_t sdcard_get_total_song_pages(void) {
+    return total_song_pages;
+}
+
+bool sdcard_has_prev_page(void) {
+    return song_page > 0;
+}
+
+bool sdcard_has_next_page(void) {
+    return song_page_has_next;
 }
 
 const sdcard_song_t* sdcard_get_song(size_t index) {
@@ -206,6 +255,50 @@ static bool sdcard_is_regular_file(const char* path, struct stat* st) {
     return S_ISREG(st->st_mode);
 }
 
+static bool sdcard_is_song_file(const char* name) {
+    struct stat st;
+    char path[SDCARD_MAX_PATH_LEN];
+
+    if (sdcard_build_path(path, sizeof(path), name) != ESP_OK) {
+        return false;
+    }
+
+    return sdcard_has_mp3_extension(path) && sdcard_is_regular_file(path, &st);
+}
+
+static esp_err_t sdcard_scan_song_totals(void) {
+    DIR* dir;
+    size_t valid_song_count = 0;
+
+    dir = opendir(ROOT_PATH);
+    if (dir == NULL) {
+        ESP_LOGE(TAG, "Failed to open SD card root path: %s", ROOT_PATH);
+        return ESP_FAIL;
+    }
+
+    for (struct dirent* entry = readdir(dir); entry != NULL; entry = readdir(dir)) {
+        ESP_LOGI(TAG, "SD card entry: %s", entry->d_name);
+
+        if (sdcard_is_song_file(entry->d_name)) {
+            valid_song_count++;
+        }
+    }
+
+    closedir(dir);
+
+    total_song_count = valid_song_count;
+    total_song_pages = 0;
+    if (total_song_count > 0) {
+        total_song_pages = (total_song_count + SDCARD_MAX_SONGS - 1) / SDCARD_MAX_SONGS;
+    }
+
+    ESP_LOGI(TAG,
+             "Scanned %u total MP3 song(s), pages=%u",
+             (unsigned int)total_song_count,
+             (unsigned int)total_song_pages);
+    return ESP_OK;
+}
+
 static esp_err_t sdcard_add_song(const char* name) {
     sdcard_song_t* song;
     struct stat st;
@@ -227,7 +320,6 @@ static esp_err_t sdcard_add_song(const char* name) {
     memset(song, 0, sizeof(*song));
 
     strlcpy(song->name, name, sizeof(song->name));
-    song->size_bytes = (uint32_t)st.st_size;
 
     ESP_LOGI(TAG, "Found song: %s", song->name);
     song_count++;

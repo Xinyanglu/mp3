@@ -201,8 +201,10 @@ void screen_render_bt_scan(const screen_bt_device_t* bt_devices,
     }
 }
 
-void screen_render_song_selection(int selected_song_idx) {
+void screen_render_song_selection(size_t selected_song_idx) {
     size_t songs_count = sdcard_get_song_count();
+    size_t total_songs = sdcard_get_total_song_count();
+    size_t total_pages = sdcard_get_total_song_pages();
 
     if (lvgl_port_lock(0)) {
         lv_obj_t* screen = lv_screen_active();
@@ -214,7 +216,15 @@ void screen_render_song_selection(int selected_song_idx) {
         lv_obj_set_style_bg_opa(screen, LV_OPA_COVER, LV_PART_MAIN);
 
         lv_obj_t* title = lv_label_create(screen);
-        lv_label_set_text_fmt(title, "Songs: %u", (unsigned int)songs_count);
+        if (total_songs > 0) {
+            lv_label_set_text_fmt(title,
+                                  "Songs: %u  Page %u/%u",
+                                  (unsigned int)total_songs,
+                                  (unsigned int)(sdcard_get_song_page() + 1),
+                                  (unsigned int)total_pages);
+        } else {
+            lv_label_set_text(title, "Songs: 0");
+        }
         lv_obj_set_style_text_color(title, lv_color_hex(0x202020), LV_PART_MAIN);
         lv_obj_align(title, LV_ALIGN_TOP_LEFT, 12, 12);
 
@@ -230,7 +240,7 @@ void screen_render_song_selection(int selected_song_idx) {
             lv_label_set_long_mode(song_label, LV_LABEL_LONG_DOT);
             lv_label_set_text(song_label, song->name);
 
-            if ((int)i == selected_song_idx) {
+            if (i == selected_song_idx) {
                 lv_obj_set_style_bg_color(song_label, lv_color_hex(0x202020), LV_PART_MAIN);
                 lv_obj_set_style_bg_opa(song_label, LV_OPA_COVER, LV_PART_MAIN);
                 lv_obj_set_style_text_color(song_label, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
@@ -239,7 +249,7 @@ void screen_render_song_selection(int selected_song_idx) {
             }
 
             lv_obj_align(song_label, LV_ALIGN_TOP_LEFT, 12, y);
-            y += 28;
+            y += 24;
         }
 
         if (songs_count == 0) {
@@ -253,12 +263,8 @@ void screen_render_song_selection(int selected_song_idx) {
     }
 }
 
-void screen_render_song_loading(int selected_song_idx) {
-    const sdcard_song_t* song = NULL;
-
-    if (selected_song_idx >= 0) {
-        song = sdcard_get_song((size_t)selected_song_idx);
-    }
+void screen_render_song_loading(size_t selected_song_idx) {
+    const sdcard_song_t* song = sdcard_get_song(selected_song_idx);
 
     if (lvgl_port_lock(0)) {
         lv_obj_t* screen = lv_screen_active();
@@ -285,12 +291,8 @@ void screen_render_song_loading(int selected_song_idx) {
     }
 }
 
-void screen_render_song_playing(int selected_song_idx) {
-    const sdcard_song_t* song = NULL;
-
-    if (selected_song_idx >= 0) {
-        song = sdcard_get_song((size_t)selected_song_idx);
-    }
+void screen_render_song_playing(size_t selected_song_idx) {
+    const sdcard_song_t* song = sdcard_get_song(selected_song_idx);
 
     if (lvgl_port_lock(0)) {
         lv_obj_t* screen = lv_screen_active();

@@ -6,6 +6,7 @@
 #include "screen.h"
 
 #include <stdbool.h>
+#include <stdint.h>
 #include <string.h>
 
 #include "bt_app.h"
@@ -21,13 +22,14 @@
 
 #define MAX_BT_DEVICE_NUM 16
 #define MAX_BT_DEVICE_TIMEOUT_MS 10000
+#define SCREEN_INVALID_SONG_IDX SIZE_MAX
 
 static const char* TAG = "screen";
 
 static screen_bt_device_t bt_devices[MAX_BT_DEVICE_NUM];
 static uint8_t num_bt_devices;
 static int selected_bt_device_idx = -1;
-static int selected_song_idx      = -1;
+static size_t selected_song_idx   = SCREEN_INVALID_SONG_IDX;
 static bool song_paused;
 static esp_timer_handle_t bt_scan_refresh_timer;
 static screen_state current_screen = SCREEN_STATE_BT_DISCOVERY;
@@ -49,6 +51,9 @@ static void screen_show_song_selection(void);
 static void screen_show_song_loading(void);
 static void screen_show_song_playing(void);
 static void screen_update_song_progress(uint32_t elapsed_seconds, uint32_t total_seconds);
+static esp_err_t screen_play_selected_song(void);
+static esp_err_t screen_play_next_song(void);
+static void screen_load_song_page(size_t page_index, size_t selected_idx);
 
 static QueueHandle_t screen_event_queue = NULL;
 static TaskHandle_t screen_task_handle  = NULL;
@@ -81,6 +86,13 @@ static void screen_task_handler(void* arg __attribute__((unused))) {
                 screen_show_song_selection();
                 break;
 
+            case SCREEN_EVT_BT_DEVICE_DISCONNECTED:
+                current_screen = SCREEN_STATE_BT_DISCOVERY;
+                selected_song_idx = SCREEN_INVALID_SONG_IDX;
+                song_paused = false;
+                screen_show_bt_scan();
+                break;
+
             case SCREEN_EVT_SONG_PLAYING:
                 current_screen = SCREEN_STATE_SONG_PLAYING;
                 song_paused = false;
@@ -89,6 +101,10 @@ static void screen_task_handler(void* arg __attribute__((unused))) {
 
             case SCREEN_EVT_SONG_PROGRESS:
                 screen_update_song_progress(msg.elapsed_seconds, msg.total_seconds);
+                break;
+
+            case SCREEN_EVT_SONG_FINISHED:
+                screen_play_next_song();
                 break;
 
             default:
@@ -156,6 +172,11 @@ void screen_notify_button_press(screen_button button) {
     xQueueSend(screen_event_queue, &msg, 0);
 }
 
+void screen_notify_show_bt_discovery(void) {
+    screen_msg msg = {.event = SCREEN_EVT_BT_DEVICE_DISCONNECTED};
+    xQueueSend(screen_event_queue, &msg, 0);
+}
+
 void screen_notify_show_song_selection(void) {
     screen_msg msg = {.event = SCREEN_EVT_BT_DEVICE_CONNECTED};
     xQueueSend(screen_event_queue, &msg, 0);
@@ -172,6 +193,11 @@ void screen_notify_song_progress(uint32_t elapsed_seconds, uint32_t total_second
         .elapsed_seconds = elapsed_seconds,
         .total_seconds = total_seconds,
     };
+    xQueueSend(screen_event_queue, &msg, 0);
+}
+
+void screen_notify_song_finished(void) {
+    screen_msg msg = {.event = SCREEN_EVT_SONG_FINISHED};
     xQueueSend(screen_event_queue, &msg, 0);
 }
 
@@ -328,28 +354,37 @@ static esp_err_t screen_handle_song_select_btn_press(screen_button button) {
     size_t songs_count = sdcard_get_song_count();
 
     if (songs_count == 0) {
-        selected_song_idx = -1;
+        selected_song_idx = SCREEN_INVALID_SONG_IDX;
         return ESP_OK;
     }
 
-    if (selected_song_idx < 0 || selected_song_idx >= (int)songs_count) {
+    if (selected_song_idx >= songs_count) {
         selected_song_idx = 0;
     }
 
     switch (button) {
     case SCREEN_BTN_UP:
-        selected_song_idx = (selected_song_idx - 1 + (int)songs_count) % (int)songs_count;
+        if (selected_song_idx > 0) {
+            selected_song_idx--;
+        } else if (sdcard_has_prev_page()) {
+            screen_load_song_page(sdcard_get_song_page() - 1, SDCARD_MAX_SONGS - 1);
+        } else {
+            selected_song_idx = songs_count - 1;
+        }
         screen_show_song_selection();
         break;
     case SCREEN_BTN_DOWN:
-        selected_song_idx = (selected_song_idx + 1) % (int)songs_count;
+        if (selected_song_idx < songs_count - 1) {
+            selected_song_idx++;
+        } else if (sdcard_has_next_page()) {
+            screen_load_song_page(sdcard_get_song_page() + 1, 0);
+        } else {
+            selected_song_idx = 0;
+        }
         screen_show_song_selection();
         break;
     case SCREEN_BTN_SELECT:
-        current_screen = SCREEN_STATE_SONG_LOADING;
-        song_paused = false;
-        screen_show_song_loading();
-        ESP_RETURN_ON_ERROR(player_play(selected_song_idx), TAG, "Failed to start player");
+        ESP_RETURN_ON_ERROR(screen_play_selected_song(), TAG, "Failed to start selected song");
         break;
     default:
         break;
@@ -385,8 +420,8 @@ static void screen_show_song_selection(void) {
     size_t songs_count = sdcard_get_song_count();
 
     if (songs_count == 0) {
-        selected_song_idx = -1;
-    } else if (selected_song_idx < 0 || selected_song_idx >= (int)songs_count) {
+        selected_song_idx = SCREEN_INVALID_SONG_IDX;
+    } else if (selected_song_idx >= songs_count) {
         selected_song_idx = 0;
     }
 
@@ -407,4 +442,61 @@ static void screen_update_song_progress(uint32_t elapsed_seconds, uint32_t total
     }
 
     screen_render_song_progress(elapsed_seconds, total_seconds);
+}
+
+static esp_err_t screen_play_selected_song(void) {
+    current_screen = SCREEN_STATE_SONG_LOADING;
+    song_paused = false;
+    screen_show_song_loading();
+    return player_play(selected_song_idx);
+}
+
+static esp_err_t screen_play_next_song(void) {
+    size_t songs_count = sdcard_get_song_count();
+
+    if (songs_count == 0) {
+        current_screen = SCREEN_STATE_SONG_SELECT;
+        selected_song_idx = SCREEN_INVALID_SONG_IDX;
+        song_paused = false;
+        screen_show_song_selection();
+        return ESP_OK;
+    }
+
+    if (selected_song_idx >= songs_count) {
+        selected_song_idx = 0;
+    } else if (selected_song_idx < songs_count - 1) {
+        selected_song_idx++;
+    } else if (sdcard_has_next_page()) {
+        screen_load_song_page(sdcard_get_song_page() + 1, 0);
+    } else {
+        screen_load_song_page(0, 0);
+    }
+
+    songs_count = sdcard_get_song_count();
+    if (songs_count == 0 || selected_song_idx >= songs_count) {
+        current_screen = SCREEN_STATE_SONG_SELECT;
+        selected_song_idx = SCREEN_INVALID_SONG_IDX;
+        song_paused = false;
+        screen_show_song_selection();
+        return ESP_OK;
+    }
+
+    return screen_play_selected_song();
+}
+
+static void screen_load_song_page(size_t page_index, size_t selected_idx) {
+    esp_err_t ret = sdcard_load_song_page(page_index);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to load song page %u: %s", (unsigned int)page_index, esp_err_to_name(ret));
+        return;
+    }
+
+    size_t songs_count = sdcard_get_song_count();
+    if (songs_count == 0) {
+        selected_song_idx = SCREEN_INVALID_SONG_IDX;
+    } else if (selected_idx >= songs_count) {
+        selected_song_idx = songs_count - 1;
+    } else {
+        selected_song_idx = selected_idx;
+    }
 }

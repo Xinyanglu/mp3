@@ -54,6 +54,7 @@ typedef enum {
     PLAYER_EVT_PAUSE,
     PLAYER_EVT_RESUME,
     PLAYER_EVT_FINISHED,
+    PLAYER_EVT_CLEAR,
 } player_event_t;
 
 typedef struct {
@@ -80,9 +81,10 @@ static void player_handle_play(const char* path);
 static void player_handle_pause(void);
 static void player_handle_resume(void);
 static void player_handle_finished(void);
+static void player_handle_clear(void);
 static void player_clear_pending_events(void);
 static void player_reset_pcm_state(void);
-static void player_destroy_active(bool stop_first);
+static void player_destroy_active(void);
 static void player_apply_pcm_gain(uint8_t* data, size_t len);
 static esp_err_t player_build_file_uri(char* uri, size_t uri_size, const char* path);
 static esp_err_t player_gmf_err_to_esp_err(esp_gmf_err_t err);
@@ -264,6 +266,16 @@ esp_err_t player_resume(void) {
     return player_send_msg(&msg);
 }
 
+esp_err_t player_clear(void) {
+    player_msg_t msg = {
+        .event = PLAYER_EVT_CLEAR,
+    };
+
+    ESP_RETURN_ON_FALSE(player_queue != NULL, ESP_ERR_INVALID_STATE, TAG, "Player queue not initialized");
+
+    return player_send_msg(&msg);
+}
+
 static esp_err_t player_start_file(const char* path) {
     esp_asp_handle_t simple_player = NULL;
     char uri[PLAYER_MAX_FILE_URI_LEN];
@@ -284,7 +296,7 @@ static esp_err_t player_start_file(const char* path) {
         return ESP_ERR_INVALID_ARG;
     }
 
-    player_destroy_active(true);
+    player_destroy_active();
     memset(&active_audio_info, 0, sizeof(active_audio_info));
     active_decode_ctx.file_size_bytes = 0;
 
@@ -370,6 +382,9 @@ static void player_task_handler(void* arg __attribute__((unused))) {
         case PLAYER_EVT_FINISHED:
             player_handle_finished();
             break;
+        case PLAYER_EVT_CLEAR:
+            player_handle_clear();
+            break;
         default:
             ESP_LOGW(TAG, "Unhandled player event: %d", msg.event);
             break;
@@ -438,10 +453,14 @@ static void player_handle_resume(void) {
 }
 
 static void player_handle_finished(void) {
+    player_handle_clear();
+    screen_notify_song_finished();
+}
+
+static void player_handle_clear(void) {
     player_clear_pending_events();
-    player_destroy_active(false);
+    player_destroy_active();
     player_reset_pcm_state();
-    screen_notify_show_song_selection();
 }
 
 static void player_clear_pending_events(void) {
@@ -463,16 +482,13 @@ static void player_reset_pcm_state(void) {
     pcm_media_started = false;
 }
 
-static void player_destroy_active(bool stop_first) {
+static void player_destroy_active(void) {
     esp_gmf_err_t gmf_ret;
 
     if (active_simple_player == NULL) {
         return;
     }
 
-    if (stop_first) {
-        (void)esp_audio_simple_player_stop(active_simple_player);
-    }
     gmf_ret = esp_audio_simple_player_destroy(active_simple_player);
     if (gmf_ret != ESP_GMF_ERR_OK) {
         ESP_LOGW(TAG, "Failed to destroy active player: %s", esp_err_to_name(player_gmf_err_to_esp_err(gmf_ret)));
