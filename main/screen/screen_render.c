@@ -24,6 +24,8 @@
 #define LCD_H_RES 320
 #define LCD_V_RES 240
 #define LCD_DRAW_BUFF_HEIGHT 20
+#define SONG_SELECT_ROW_HEIGHT 24
+#define SONG_SELECT_LABEL_HEIGHT 20
 
 #define LCD_PIXEL_CLOCK_HZ (20 * 1000 * 1000)
 #define LCD_CMD_BITS 8
@@ -236,7 +238,7 @@ void screen_render_song_selection(size_t selected_song_idx) {
             }
 
             lv_obj_t* song_label = lv_label_create(screen);
-            lv_obj_set_width(song_label, LCD_H_RES - 24);
+            lv_obj_set_size(song_label, LCD_H_RES - 24, SONG_SELECT_LABEL_HEIGHT);
             lv_label_set_long_mode(song_label, LV_LABEL_LONG_DOT);
             lv_label_set_text(song_label, song->name);
 
@@ -249,7 +251,7 @@ void screen_render_song_selection(size_t selected_song_idx) {
             }
 
             lv_obj_align(song_label, LV_ALIGN_TOP_LEFT, 12, y);
-            y += 24;
+            y += SONG_SELECT_ROW_HEIGHT;
         }
 
         if (songs_count == 0) {

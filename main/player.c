@@ -70,6 +70,7 @@ typedef struct {
 static QueueHandle_t player_queue;
 static TaskHandle_t player_task_handle;
 static esp_asp_handle_t active_simple_player;
+static char active_song_path[SDCARD_MAX_PATH_LEN];
 static player_audio_info_t active_audio_info;
 static player_decode_ctx_t active_decode_ctx = {
     .info = &active_audio_info,
@@ -421,7 +422,11 @@ static void player_handle_play(const char* path) {
     ret = player_start_file(play_path);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to play song %s: %s", play_path, esp_err_to_name(ret));
+        active_song_path[0] = '\0';
+        return;
     }
+
+    strlcpy(active_song_path, play_path, sizeof(active_song_path));
 }
 
 static void player_handle_pause(void) {
@@ -461,6 +466,7 @@ static void player_handle_clear(void) {
     player_clear_pending_events();
     player_destroy_active();
     player_reset_pcm_state();
+    active_song_path[0] = '\0';
 }
 
 static void player_clear_pending_events(void) {

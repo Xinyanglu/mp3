@@ -14,6 +14,8 @@
 #define BUTTON_SELECT GPIO_NUM_4
 #define BUTTON_UP GPIO_NUM_21
 #define BUTTON_DOWN GPIO_NUM_32
+#define BUTTON_RIGHT GPIO_NUM_34
+#define BUTTON_LEFT GPIO_NUM_35
 
 #define BUTTON_DEBOUNCE_MS 200
 #define BUTTON_TASK_PRIORITY 10
@@ -81,9 +83,10 @@ esp_err_t buttons_init(void) {
     ESP_RETURN_ON_FALSE(buttons_event_queue != NULL, ESP_ERR_NO_MEM, TAG, "Button queue create failed");
 
     const gpio_config_t button_config = {
-        .pin_bit_mask = (1ULL << BUTTON_SELECT) | (1ULL << BUTTON_UP) | (1ULL << BUTTON_DOWN),
+        .pin_bit_mask = (1ULL << BUTTON_SELECT) | (1ULL << BUTTON_UP) | (1ULL << BUTTON_DOWN) |
+                        (1ULL << BUTTON_RIGHT) | (1ULL << BUTTON_LEFT),
         .mode         = GPIO_MODE_INPUT,
-        .pull_up_en   = GPIO_PULLUP_ENABLE,
+        .pull_up_en   = GPIO_PULLUP_DISABLE,
         .pull_down_en = GPIO_PULLDOWN_DISABLE,
         .intr_type    = GPIO_INTR_NEGEDGE,
     };
@@ -104,6 +107,12 @@ esp_err_t buttons_init(void) {
     ESP_RETURN_ON_ERROR(gpio_isr_handler_add(BUTTON_DOWN, button_select_isr_handler, (void*)SCREEN_BTN_DOWN),
                         TAG,
                         "Down button ISR add failed");
+    ESP_RETURN_ON_ERROR(gpio_isr_handler_add(BUTTON_RIGHT, button_select_isr_handler, (void*)SCREEN_BTN_RIGHT),
+                        TAG,
+                        "Right button ISR add failed");
+    ESP_RETURN_ON_ERROR(gpio_isr_handler_add(BUTTON_LEFT, button_select_isr_handler, (void*)SCREEN_BTN_LEFT),
+                        TAG,
+                        "Left button ISR add failed");
 
     BaseType_t task_created =
         xTaskCreate(buttons_task_handler, "ButtonsTask", 3072, NULL, BUTTON_TASK_PRIORITY, &buttons_task_handle);
