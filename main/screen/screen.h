@@ -30,6 +30,7 @@ typedef enum {
     SCREEN_BTN_LEFT,
     SCREEN_BTN_RIGHT,
     SCREEN_BTN_SELECT,
+    SCREEN_BTN_SELECT_LONG,
     SCREEN_BTN_MAX
 } screen_button;
 

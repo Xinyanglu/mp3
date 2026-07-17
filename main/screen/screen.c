@@ -145,6 +145,7 @@ static const char* screen_button_to_str(screen_button button) {
         [SCREEN_BTN_LEFT]   = "SCREEN_BTN_LEFT",
         [SCREEN_BTN_RIGHT]  = "SCREEN_BTN_RIGHT",
         [SCREEN_BTN_SELECT] = "SCREEN_BTN_SELECT",
+        [SCREEN_BTN_SELECT_LONG] = "SCREEN_BTN_SELECT_LONG",
     };
 
     if (button >= SCREEN_BTN_MAX || button_names[button] == NULL) {

@@ -6,6 +6,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #include "freertos/task.h"
+#include "freertos/timers.h"
 
 #include "screen.h"
 
@@ -18,22 +19,41 @@
 #define BUTTON_LEFT GPIO_NUM_35
 
 #define BUTTON_DEBOUNCE_MS 200
+#define BUTTON_LONG_PRESS_MS 700
 #define BUTTON_TASK_PRIORITY 10
 
 static QueueHandle_t buttons_event_queue = NULL;
 static TaskHandle_t buttons_task_handle  = NULL;
+static TimerHandle_t select_long_press_timer = NULL;
 static TickType_t last_button_isr_ticks[SCREEN_BTN_MAX];
 
 typedef struct {
     screen_button event;
+    int level;
 } button_msg;
+
+static void select_long_press_timer_cb(TimerHandle_t timer) {
+    (void)timer;
+
+    if (gpio_get_level(BUTTON_SELECT) != 0) {
+        return;
+    }
+
+    ESP_LOGI(TAG, "%s, event: 0x%x", __func__, SCREEN_BTN_SELECT_LONG);
+    screen_notify_button_press(SCREEN_BTN_SELECT_LONG);
+}
 
 static void IRAM_ATTR button_select_isr_handler(void* arg) {
     screen_button event = (screen_button)(uintptr_t)arg;
     TickType_t now      = xTaskGetTickCountFromISR();
+    int level           = 0;
 
-    if (event < 0 || event >= SCREEN_BTN_MAX) {
+    if (event < 0 || event >= SCREEN_BTN_SELECT_LONG) {
         return;
+    }
+
+    if (event == SCREEN_BTN_SELECT) {
+        level = gpio_get_level(BUTTON_SELECT);
     }
 
     if (last_button_isr_ticks[event] != 0 && (now - last_button_isr_ticks[event]) < pdMS_TO_TICKS(BUTTON_DEBOUNCE_MS)) {
@@ -42,6 +62,7 @@ static void IRAM_ATTR button_select_isr_handler(void* arg) {
 
     button_msg msg = {
         .event = event,
+        .level = level,
     };
     BaseType_t higher_priority_task_woken = pdFALSE;
 
@@ -61,6 +82,19 @@ static void buttons_task_handler(void* arg __attribute__((unused))) {
 
     while (1) {
         if (pdTRUE == xQueueReceive(buttons_event_queue, &msg, (TickType_t)portMAX_DELAY)) {
+            if (msg.event == SCREEN_BTN_SELECT && msg.level != 0) {
+                xTimerStop(select_long_press_timer, 0);
+                continue;
+            }
+
+            if (msg.level != 0) {
+                continue;
+            }
+
+            if (msg.event == SCREEN_BTN_SELECT) {
+                xTimerReset(select_long_press_timer, 0);
+            }
+
             switch (msg.event) {
             case SCREEN_BTN_UP:
             case SCREEN_BTN_DOWN:
@@ -82,16 +116,24 @@ esp_err_t buttons_init(void) {
     buttons_event_queue = xQueueCreate(10, sizeof(button_msg));
     ESP_RETURN_ON_FALSE(buttons_event_queue != NULL, ESP_ERR_NO_MEM, TAG, "Button queue create failed");
 
+    select_long_press_timer =
+        xTimerCreate("SelectLongPress", pdMS_TO_TICKS(BUTTON_LONG_PRESS_MS), pdFALSE, NULL, select_long_press_timer_cb);
+    ESP_RETURN_ON_FALSE(select_long_press_timer != NULL, ESP_ERR_NO_MEM, TAG, "Select long press timer create failed");
+
     const gpio_config_t button_config = {
         .pin_bit_mask = (1ULL << BUTTON_SELECT) | (1ULL << BUTTON_UP) | (1ULL << BUTTON_DOWN) |
                         (1ULL << BUTTON_RIGHT) | (1ULL << BUTTON_LEFT),
         .mode         = GPIO_MODE_INPUT,
         .pull_up_en   = GPIO_PULLUP_DISABLE,
         .pull_down_en = GPIO_PULLDOWN_DISABLE,
-        .intr_type    = GPIO_INTR_NEGEDGE,
+        .intr_type    = GPIO_INTR_ANYEDGE,
     };
 
     ESP_RETURN_ON_ERROR(gpio_config(&button_config), TAG, "Select button GPIO config failed");
+    ESP_RETURN_ON_ERROR(gpio_set_intr_type(BUTTON_UP, GPIO_INTR_NEGEDGE), TAG, "Up button interrupt config failed");
+    ESP_RETURN_ON_ERROR(gpio_set_intr_type(BUTTON_DOWN, GPIO_INTR_NEGEDGE), TAG, "Down button interrupt config failed");
+    ESP_RETURN_ON_ERROR(gpio_set_intr_type(BUTTON_RIGHT, GPIO_INTR_NEGEDGE), TAG, "Right button interrupt config failed");
+    ESP_RETURN_ON_ERROR(gpio_set_intr_type(BUTTON_LEFT, GPIO_INTR_NEGEDGE), TAG, "Left button interrupt config failed");
 
     esp_err_t ret = gpio_install_isr_service(0);
     if (ret != ESP_OK && ret != ESP_ERR_INVALID_STATE) {
