@@ -31,6 +31,7 @@ static uint8_t num_bt_devices;
 static int selected_bt_device_idx = -1;
 static size_t selected_song_idx   = SCREEN_INVALID_SONG_IDX;
 static bool song_paused;
+static bool select_press_started_in_song_playing;
 static esp_timer_handle_t bt_scan_refresh_timer;
 static screen_state current_screen = SCREEN_STATE_BT_DISCOVERY;
 
@@ -71,6 +72,9 @@ static void screen_task_handler(void* arg __attribute__((unused))) {
 
             case SCREEN_EVT_BTN_PRESS:
                 ESP_LOGI(TAG, "Button press: %s (%d)", screen_button_to_str(msg.button), msg.button);
+                if (msg.button == SCREEN_BTN_SELECT) {
+                    select_press_started_in_song_playing = msg.screen_state == SCREEN_STATE_SONG_PLAYING;
+                }
                 if (current_screen == msg.screen_state) {
                     screen_handle_btn_press(msg.button);
                 }
@@ -397,15 +401,21 @@ static esp_err_t screen_handle_song_select_btn_press(screen_button button) {
 static esp_err_t screen_handle_song_playing_btn_press(screen_button button) {
     esp_err_t ret;
 
-    if (button != SCREEN_BTN_SELECT) {
-        return ESP_OK;
+    if (button == SCREEN_BTN_SELECT) {
+        ret = song_paused ? player_resume() : player_pause();
+        ESP_RETURN_ON_ERROR(ret, TAG, "Failed to toggle playback pause");
+
+        song_paused = !song_paused;
+        screen_render_song_paused(song_paused);
+    } else if (button == SCREEN_BTN_SELECT_LONG) {
+        if (!select_press_started_in_song_playing) {
+            return ESP_OK;
+        }
+
+        current_screen = SCREEN_STATE_SONG_SELECT;
+        screen_show_song_selection();
     }
 
-    ret = song_paused ? player_resume() : player_pause();
-    ESP_RETURN_ON_ERROR(ret, TAG, "Failed to toggle playback pause");
-
-    song_paused = !song_paused;
-    screen_render_song_paused(song_paused);
     return ESP_OK;
 }
 
