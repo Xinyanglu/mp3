@@ -9,11 +9,19 @@
 #include <inttypes.h>
 #include <stdlib.h>
 
+#include "bt_app.h"
 #include "bt_app_core.h"
+#include "esp_err.h"
 #include "esp_log.h"
 
+#define BT_VOLUME_STEP 8
+#define BT_VOLUME_MAX 127
+
 static void bt_av_hdl_avrc_ct_evt(uint16_t event, void* p_param);
+static void bt_av_volume_change_hdlr(uint16_t event, void* p_param);
 static void bt_av_notify_evt_handler(uint8_t event_id, esp_avrc_rn_param_t* event_parameter);
+
+static uint8_t s_volume = BT_VOLUME_MAX / 2;
 
 void bt_app_rc_ct_cb(esp_avrc_ct_cb_event_t event, esp_avrc_ct_cb_param_t* param) {
     switch (event) {
@@ -33,7 +41,7 @@ void bt_app_rc_ct_cb(esp_avrc_ct_cb_event_t event, esp_avrc_ct_cb_param_t* param
     }
 }
 
-static void bt_av_volume_changed(void) {
+static void bt_av_register_volume_change_notification(void) {
     if (esp_avrc_rn_evt_bit_mask_operation(ESP_AVRC_BIT_MASK_OP_TEST, &s_avrc_peer_rn_cap, ESP_AVRC_RN_VOLUME_CHANGE)) {
         esp_avrc_ct_send_register_notification_cmd(APP_RC_CT_TL_RN_VOLUME_CHANGE, ESP_AVRC_RN_VOLUME_CHANGE, 0);
     }
@@ -43,13 +51,45 @@ static void bt_av_notify_evt_handler(uint8_t event_id, esp_avrc_rn_param_t* even
     switch (event_id) {
     case ESP_AVRC_RN_VOLUME_CHANGE:
         ESP_LOGI(BT_RC_CT_TAG, "Volume changed: %d", event_parameter->volume);
-        ESP_LOGI(BT_RC_CT_TAG, "Set absolute volume: volume %d", event_parameter->volume + 5);
-        esp_avrc_ct_send_set_absolute_volume_cmd(APP_RC_CT_TL_RN_VOLUME_CHANGE, event_parameter->volume + 5);
-        bt_av_volume_changed();
+        s_volume = event_parameter->volume;
+        bt_av_register_volume_change_notification();
         break;
     default:
         break;
     }
+}
+
+static void bt_av_volume_change_hdlr(uint16_t event, void* p_param) {
+    int8_t delta;
+    int next_volume;
+
+    (void)event;
+
+    if (p_param == NULL) {
+        return;
+    }
+
+    delta = *(int8_t*)p_param;
+    next_volume = (int)s_volume + delta;
+    if (next_volume < 0) {
+        next_volume = 0;
+    } else if (next_volume > BT_VOLUME_MAX) {
+        next_volume = BT_VOLUME_MAX;
+    }
+
+    s_volume = (uint8_t)next_volume;
+    ESP_LOGI(BT_RC_CT_TAG, "Set absolute volume: volume %d", s_volume);
+    esp_avrc_ct_send_set_absolute_volume_cmd(APP_RC_CT_TL_SET_VOLUME, s_volume);
+}
+
+esp_err_t bt_app_volume_up(void) {
+    int8_t delta = BT_VOLUME_STEP;
+    return bt_app_work_dispatch(bt_av_volume_change_hdlr, 0, &delta, sizeof(delta), NULL) ? ESP_OK : ESP_FAIL;
+}
+
+esp_err_t bt_app_volume_down(void) {
+    int8_t delta = -BT_VOLUME_STEP;
+    return bt_app_work_dispatch(bt_av_volume_change_hdlr, 0, &delta, sizeof(delta), NULL) ? ESP_OK : ESP_FAIL;
 }
 
 static void bt_av_hdl_avrc_ct_evt(uint16_t event, void* p_param) {
@@ -106,10 +146,11 @@ static void bt_av_hdl_avrc_ct_evt(uint16_t event, void* p_param) {
                  rc->get_rn_caps_rsp.cap_count,
                  rc->get_rn_caps_rsp.evt_set.bits);
         s_avrc_peer_rn_cap.bits = rc->get_rn_caps_rsp.evt_set.bits;
-        bt_av_volume_changed();
+        bt_av_register_volume_change_notification();
         break;
     case ESP_AVRC_CT_SET_ABSOLUTE_VOLUME_RSP_EVT:
         ESP_LOGI(BT_RC_CT_TAG, "Set absolute volume response: volume %d", rc->set_volume_rsp.volume);
+        s_volume = rc->set_volume_rsp.volume;
         break;
     case ESP_AVRC_CT_PROF_STATE_EVT:
         if (ESP_AVRC_INIT_SUCCESS == rc->avrc_ct_init_stat.state) {

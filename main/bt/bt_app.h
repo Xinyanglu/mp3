@@ -22,3 +22,5 @@ void init_bt_app(void);
 void bt_app_connect_to(const char* name, esp_bd_addr_t bda);
 void bt_app_start_media(void);
 esp_err_t bt_app_set_audio_info(const bt_app_audio_info_t* info);
+esp_err_t bt_app_volume_up(void);
+esp_err_t bt_app_volume_down(void);

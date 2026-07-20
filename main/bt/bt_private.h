@@ -23,6 +23,7 @@
 
 #define APP_RC_CT_TL_GET_CAPS 0
 #define APP_RC_CT_TL_RN_VOLUME_CHANGE 1
+#define APP_RC_CT_TL_SET_VOLUME 2
 
 enum {
     BT_APP_STACK_UP_EVT   = 0x0000,

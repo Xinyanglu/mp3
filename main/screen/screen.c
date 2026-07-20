@@ -37,7 +37,7 @@ static screen_state current_screen = SCREEN_STATE_BT_DISCOVERY;
 
 static void add_bt_device(const char* name, esp_bd_addr_t bda);
 static int find_bt_device(esp_bd_addr_t bda);
-static void screen_refresh_bt_scan(void* arg);
+static void screen_refresh_bt_scan();
 static void screen_show_bt_scan(void);
 static esp_err_t screen_add_bt_device(const char* name, esp_bd_addr_t bda);
 static esp_err_t screen_handle_btn_press(screen_button button);
@@ -67,7 +67,7 @@ static void screen_task_handler(void* arg __attribute__((unused))) {
 
             switch (msg.event) {
             case SCREEN_EVT_REFRESH_BT_SCAN:
-                screen_refresh_bt_scan(NULL);
+                screen_refresh_bt_scan();
                 break;
 
             case SCREEN_EVT_BTN_PRESS:
@@ -289,8 +289,7 @@ static int find_prev_bt_device(int start_idx) {
     return -1;
 }
 
-static void screen_refresh_bt_scan(void* arg) {
-    (void)arg;
+static void screen_refresh_bt_scan() {
     screen_remove_old_bt_devices();
     screen_show_bt_scan();
 }
@@ -407,6 +406,10 @@ static esp_err_t screen_handle_song_playing_btn_press(screen_button button) {
 
         song_paused = !song_paused;
         screen_render_song_paused(song_paused);
+    } else if (button == SCREEN_BTN_UP) {
+        ESP_RETURN_ON_ERROR(bt_app_volume_up(), TAG, "Failed to raise volume");
+    } else if (button == SCREEN_BTN_DOWN) {
+        ESP_RETURN_ON_ERROR(bt_app_volume_down(), TAG, "Failed to lower volume");
     } else if (button == SCREEN_BTN_SELECT_LONG) {
         if (!select_press_started_in_song_playing) {
             return ESP_OK;
