@@ -94,7 +94,7 @@ static uint32_t player_estimate_total_seconds(uint64_t file_size_bytes, uint32_t
 
 static int player_simple_out_cb(uint8_t* data, int data_size, void* ctx) {
     player_decode_ctx_t* decode_ctx = (player_decode_ctx_t*)ctx;
-    size_t written = 0;
+    size_t written                  = 0;
     size_t data_len;
 
     if (decode_ctx == NULL || data == NULL || data_size < 0 || pcm_stream == NULL) {
@@ -175,13 +175,14 @@ static int player_simple_event_cb(esp_asp_event_pkt_t* event, void* ctx) {
     }
 
     memcpy(&music_info, event->payload, sizeof(music_info));
-    decode_ctx->info->sample_rate = (uint32_t)music_info.sample_rate;
+    decode_ctx->info->sample_rate     = (uint32_t)music_info.sample_rate;
     decode_ctx->info->bits_per_sample = music_info.bits;
-    decode_ctx->info->channels = music_info.channels;
-    decode_ctx->info->bitrate = (uint32_t)music_info.bitrate;
+    decode_ctx->info->channels        = music_info.channels;
+    decode_ctx->info->bitrate         = (uint32_t)music_info.bitrate;
 
-    pcm_bytes_per_second = decode_ctx->info->sample_rate * decode_ctx->info->channels * (decode_ctx->info->bits_per_sample / 8U);
-    pcm_total_seconds = player_estimate_total_seconds(decode_ctx->file_size_bytes, decode_ctx->info->bitrate);
+    pcm_bytes_per_second =
+        decode_ctx->info->sample_rate * decode_ctx->info->channels * (decode_ctx->info->bits_per_sample / 8U);
+    pcm_total_seconds         = player_estimate_total_seconds(decode_ctx->file_size_bytes, decode_ctx->info->bitrate);
     pcm_last_progress_seconds = 0;
 
     ESP_LOGI(TAG,
@@ -222,8 +223,8 @@ esp_err_t player_init(void) {
         return ESP_ERR_NO_MEM;
     }
 
-    BaseType_t task_created =
-        xTaskCreate(player_task_handler, "PlayerTask", PLAYER_TASK_STACK_SIZE, NULL, PLAYER_TASK_PRIORITY, &player_task_handle);
+    BaseType_t task_created = xTaskCreate(
+        player_task_handler, "PlayerTask", PLAYER_TASK_STACK_SIZE, NULL, PLAYER_TASK_PRIORITY, &player_task_handle);
     if (task_created != pdPASS) {
         vStreamBufferDeleteWithCaps(pcm_stream);
         pcm_stream = NULL;
@@ -282,11 +283,11 @@ static esp_err_t player_start_file(const char* path) {
     char uri[PLAYER_MAX_FILE_URI_LEN];
     struct stat st;
     esp_asp_cfg_t player_cfg = {
-        .out.cb = player_simple_out_cb,
-        .out.user_ctx = &active_decode_ctx,
-        .task_prio = PLAYER_SIMPLE_TASK_PRIORITY,
-        .task_stack = PLAYER_SIMPLE_TASK_STACK_SIZE,
-        .task_core = PLAYER_SIMPLE_TASK_CORE,
+        .out.cb            = player_simple_out_cb,
+        .out.user_ctx      = &active_decode_ctx,
+        .task_prio         = PLAYER_SIMPLE_TASK_PRIORITY,
+        .task_stack        = PLAYER_SIMPLE_TASK_STACK_SIZE,
+        .task_core         = PLAYER_SIMPLE_TASK_CORE,
         .task_stack_in_ext = true,
     };
     esp_gmf_err_t gmf_ret;
@@ -321,7 +322,7 @@ static esp_err_t player_start_file(const char* path) {
     }
 
     if (gmf_ret != ESP_GMF_ERR_OK) {
-        ret = player_gmf_err_to_esp_err(gmf_ret);
+        ret         = player_gmf_err_to_esp_err(gmf_ret);
         destroy_ret = esp_audio_simple_player_destroy(simple_player);
         if (ret == ESP_OK && destroy_ret != ESP_GMF_ERR_OK) {
             ret = player_gmf_err_to_esp_err(destroy_ret);
@@ -479,13 +480,13 @@ static void player_reset_pcm_state(void) {
     if (pcm_stream != NULL) {
         xStreamBufferReset(pcm_stream);
     }
-    pcm_total_written = 0;
-    pcm_total_read = 0;
-    pcm_next_write_log = 0;
-    pcm_bytes_per_second = 0;
-    pcm_total_seconds = 0;
+    pcm_total_written         = 0;
+    pcm_total_read            = 0;
+    pcm_next_write_log        = 0;
+    pcm_bytes_per_second      = 0;
+    pcm_total_seconds         = 0;
     pcm_last_progress_seconds = 0;
-    pcm_media_started = false;
+    pcm_media_started         = false;
 }
 
 static void player_destroy_active(void) {
@@ -511,12 +512,12 @@ static uint32_t player_estimate_total_seconds(uint64_t file_size_bytes, uint32_t
     }
 
     bitrate_bps = bitrate_kbps * 1000U;
-    total_bits = file_size_bytes * 8U;
+    total_bits  = file_size_bytes * 8U;
     return (uint32_t)((total_bits + bitrate_bps - 1U) / bitrate_bps);
 }
 
 static void player_apply_pcm_gain(uint8_t* data, size_t len) {
-    int16_t* samples = (int16_t*)data;
+    int16_t* samples    = (int16_t*)data;
     size_t sample_count = len / sizeof(int16_t);
 
     for (size_t i = 0; i < sample_count; i++) {
@@ -546,7 +547,8 @@ static esp_err_t player_build_file_uri(char* uri, size_t uri_size, const char* p
         return ESP_ERR_INVALID_ARG;
     }
 
-    written = snprintf(uri, uri_size, PLAYER_FILE_URI_PREFIX "%.*s%s", (int)(path_after_host - host), host, path_after_host);
+    written =
+        snprintf(uri, uri_size, PLAYER_FILE_URI_PREFIX "%.*s%s", (int)(path_after_host - host), host, path_after_host);
     if (written < 0 || (size_t)written >= uri_size) {
         ESP_LOGE(TAG, "Audio file URI too long: %s", path);
         return ESP_ERR_INVALID_SIZE;

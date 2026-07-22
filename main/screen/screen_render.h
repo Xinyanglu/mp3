@@ -15,9 +15,7 @@ typedef struct {
 } screen_bt_device_t;
 
 esp_err_t screen_render_init(void);
-void screen_render_bt_scan(const screen_bt_device_t* bt_devices,
-                           int max_bt_devices,
-                           uint8_t num_bt_devices,
+void screen_render_bt_scan(const screen_bt_device_t* bt_devices, int max_bt_devices, uint8_t num_bt_devices,
                            int selected_bt_device_idx);
 void screen_render_song_selection(size_t selected_song_idx);
 void screen_render_song_loading(size_t selected_song_idx);

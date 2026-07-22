@@ -141,10 +141,10 @@ esp_err_t sdcard_load_song_page(size_t page_index) {
         return ESP_ERR_INVALID_ARG;
     }
 
-    page_start = page_index * SDCARD_MAX_SONGS;
-    page_end = page_start + SDCARD_MAX_SONGS;
-    song_count = 0;
-    song_page = page_index;
+    page_start         = page_index * SDCARD_MAX_SONGS;
+    page_end           = page_start + SDCARD_MAX_SONGS;
+    song_count         = 0;
+    song_page          = page_index;
     song_page_has_next = page_index + 1 < total_song_pages;
 
     dir = opendir(ROOT_PATH);
@@ -292,10 +292,8 @@ static esp_err_t sdcard_scan_song_totals(void) {
         total_song_pages = (total_song_count + SDCARD_MAX_SONGS - 1) / SDCARD_MAX_SONGS;
     }
 
-    ESP_LOGI(TAG,
-             "Scanned %u total MP3 song(s), pages=%u",
-             (unsigned int)total_song_count,
-             (unsigned int)total_song_pages);
+    ESP_LOGI(
+        TAG, "Scanned %u total MP3 song(s), pages=%u", (unsigned int)total_song_count, (unsigned int)total_song_pages);
     return ESP_OK;
 }
 

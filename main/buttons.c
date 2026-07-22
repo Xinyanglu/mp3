@@ -22,8 +22,8 @@
 #define BUTTON_LONG_PRESS_MS 700
 #define BUTTON_TASK_PRIORITY 10
 
-static QueueHandle_t buttons_event_queue = NULL;
-static TaskHandle_t buttons_task_handle  = NULL;
+static QueueHandle_t buttons_event_queue     = NULL;
+static TaskHandle_t buttons_task_handle      = NULL;
 static TimerHandle_t select_long_press_timer = NULL;
 static TickType_t last_button_isr_ticks[SCREEN_BTN_MAX];
 
@@ -105,8 +105,8 @@ esp_err_t buttons_init(void) {
     ESP_RETURN_ON_FALSE(select_long_press_timer != NULL, ESP_ERR_NO_MEM, TAG, "Select long press timer create failed");
 
     const gpio_config_t button_config = {
-        .pin_bit_mask = (1ULL << BUTTON_SELECT) | (1ULL << BUTTON_UP) | (1ULL << BUTTON_DOWN) |
-                        (1ULL << BUTTON_RIGHT) | (1ULL << BUTTON_LEFT),
+        .pin_bit_mask = (1ULL << BUTTON_SELECT) | (1ULL << BUTTON_UP) | (1ULL << BUTTON_DOWN) | (1ULL << BUTTON_RIGHT) |
+                        (1ULL << BUTTON_LEFT),
         .mode         = GPIO_MODE_INPUT,
         .pull_up_en   = GPIO_PULLUP_DISABLE,
         .pull_down_en = GPIO_PULLDOWN_DISABLE,

@@ -69,7 +69,7 @@ static void bt_av_volume_change_hdlr(uint16_t event, void* p_param) {
         return;
     }
 
-    delta = *(int8_t*)p_param;
+    delta       = *(int8_t*)p_param;
     next_volume = (int)s_volume + delta;
     if (next_volume < 0) {
         next_volume = 0;

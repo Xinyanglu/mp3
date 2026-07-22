@@ -24,8 +24,7 @@ static bool bt_app_a2d_sbc_freq_from_sample_rate(uint32_t sample_rate, uint8_t* 
 static bool bt_app_a2d_sbc_ch_mode_from_channels(const esp_a2d_cie_sbc_t* caps, uint8_t channels, uint8_t* ch_mode);
 static void bt_app_a2d_store_sink_caps(esp_a2d_conn_hdl_t conn_hdl, const esp_a2d_mcc_t* sink_caps);
 static void bt_app_a2d_store_audio_info(const bt_app_audio_info_t* info);
-static void bt_app_a2d_set_pref_mcc(esp_a2d_conn_hdl_t conn_hdl,
-                                    const esp_a2d_mcc_t* sink_caps,
+static void bt_app_a2d_set_pref_mcc(esp_a2d_conn_hdl_t conn_hdl, const esp_a2d_mcc_t* sink_caps,
                                     const bt_app_audio_info_t* audio_info);
 static void bt_app_a2d_handle_disconnected(void);
 static void bt_app_av_state_unconnected_hdlr(uint16_t event, void* param);
@@ -105,7 +104,7 @@ esp_err_t bt_app_set_audio_info(const bt_app_audio_info_t* info) {
     }
 
     return bt_app_work_dispatch(bt_app_av_sm_hdlr, BT_APP_AUDIO_INFO_EVT, (void*)info, sizeof(*info), NULL) ? ESP_OK
-                                                                                                           : ESP_FAIL;
+                                                                                                            : ESP_FAIL;
 }
 
 void bt_app_av_sm_hdlr(uint16_t event, void* param) {
@@ -270,8 +269,8 @@ static void bt_app_a2d_store_sink_caps(esp_a2d_conn_hdl_t conn_hdl, const esp_a2
         return;
     }
 
-    s_sink_conn_hdl = conn_hdl;
-    s_sink_caps = *sink_caps;
+    s_sink_conn_hdl   = conn_hdl;
+    s_sink_caps       = *sink_caps;
     s_sink_caps_valid = true;
 }
 
@@ -296,8 +295,7 @@ static void bt_app_a2d_store_audio_info(const bt_app_audio_info_t* info) {
     bt_app_a2d_set_pref_mcc(s_sink_conn_hdl, &s_sink_caps, &s_audio_info);
 }
 
-static void bt_app_a2d_set_pref_mcc(esp_a2d_conn_hdl_t conn_hdl,
-                                    const esp_a2d_mcc_t* sink_caps,
+static void bt_app_a2d_set_pref_mcc(esp_a2d_conn_hdl_t conn_hdl, const esp_a2d_mcc_t* sink_caps,
                                     const bt_app_audio_info_t* audio_info) {
     bt_log_enter(__func__);
     esp_a2d_mcc_t pref_mcc;
@@ -351,12 +349,12 @@ static void bt_app_a2d_set_pref_mcc(esp_a2d_conn_hdl_t conn_hdl,
 }
 
 static void bt_app_a2d_handle_disconnected(void) {
-    s_media_state = APP_AV_MEDIA_STATE_IDLE;
+    s_media_state     = APP_AV_MEDIA_STATE_IDLE;
     s_sink_caps_valid = false;
     player_clear();
     screen_notify_show_bt_discovery();
 
-    s_a2d_state = APP_AV_STATE_DISCOVERING;
+    s_a2d_state   = APP_AV_STATE_DISCOVERING;
     esp_err_t ret = esp_bt_gap_start_discovery(ESP_BT_INQ_MODE_GENERAL_INQUIRY, 10, 0);
     if (ret != ESP_OK) {
         ESP_LOGW(BT_AV_TAG, "Failed to restart device discovery after disconnect: %s", esp_err_to_name(ret));

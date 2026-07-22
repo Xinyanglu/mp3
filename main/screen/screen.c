@@ -86,20 +86,20 @@ static void screen_task_handler(void* arg __attribute__((unused))) {
 
             case SCREEN_EVT_BT_DEVICE_CONNECTED:
                 current_screen = SCREEN_STATE_SONG_SELECT;
-                song_paused = false;
+                song_paused    = false;
                 screen_show_song_selection();
                 break;
 
             case SCREEN_EVT_BT_DEVICE_DISCONNECTED:
-                current_screen = SCREEN_STATE_BT_DISCOVERY;
+                current_screen    = SCREEN_STATE_BT_DISCOVERY;
                 selected_song_idx = SCREEN_INVALID_SONG_IDX;
-                song_paused = false;
+                song_paused       = false;
                 screen_show_bt_scan();
                 break;
 
             case SCREEN_EVT_SONG_PLAYING:
                 current_screen = SCREEN_STATE_SONG_PLAYING;
-                song_paused = false;
+                song_paused    = false;
                 screen_show_song_playing();
                 break;
 
@@ -144,11 +144,11 @@ esp_err_t screen_init(void) {
 
 static const char* screen_button_to_str(screen_button button) {
     static const char* const button_names[] = {
-        [SCREEN_BTN_UP]     = "SCREEN_BTN_UP",
-        [SCREEN_BTN_DOWN]   = "SCREEN_BTN_DOWN",
-        [SCREEN_BTN_LEFT]   = "SCREEN_BTN_LEFT",
-        [SCREEN_BTN_RIGHT]  = "SCREEN_BTN_RIGHT",
-        [SCREEN_BTN_SELECT] = "SCREEN_BTN_SELECT",
+        [SCREEN_BTN_UP]          = "SCREEN_BTN_UP",
+        [SCREEN_BTN_DOWN]        = "SCREEN_BTN_DOWN",
+        [SCREEN_BTN_LEFT]        = "SCREEN_BTN_LEFT",
+        [SCREEN_BTN_RIGHT]       = "SCREEN_BTN_RIGHT",
+        [SCREEN_BTN_SELECT]      = "SCREEN_BTN_SELECT",
         [SCREEN_BTN_SELECT_LONG] = "SCREEN_BTN_SELECT_LONG",
     };
 
@@ -194,9 +194,9 @@ void screen_notify_show_song_playing(void) {
 
 void screen_notify_song_progress(uint32_t elapsed_seconds, uint32_t total_seconds) {
     screen_msg msg = {
-        .event = SCREEN_EVT_SONG_PROGRESS,
+        .event           = SCREEN_EVT_SONG_PROGRESS,
         .elapsed_seconds = elapsed_seconds,
-        .total_seconds = total_seconds,
+        .total_seconds   = total_seconds,
     };
     xQueueSend(screen_event_queue, &msg, 0);
 }
@@ -460,7 +460,7 @@ static void screen_update_song_progress(uint32_t elapsed_seconds, uint32_t total
 
 static esp_err_t screen_play_selected_song(void) {
     current_screen = SCREEN_STATE_SONG_LOADING;
-    song_paused = false;
+    song_paused    = false;
     screen_show_song_loading();
     return player_play(selected_song_idx);
 }
@@ -469,9 +469,9 @@ static esp_err_t screen_play_next_song(void) {
     size_t songs_count = sdcard_get_song_count();
 
     if (songs_count == 0) {
-        current_screen = SCREEN_STATE_SONG_SELECT;
+        current_screen    = SCREEN_STATE_SONG_SELECT;
         selected_song_idx = SCREEN_INVALID_SONG_IDX;
-        song_paused = false;
+        song_paused       = false;
         screen_show_song_selection();
         return ESP_OK;
     }
@@ -488,9 +488,9 @@ static esp_err_t screen_play_next_song(void) {
 
     songs_count = sdcard_get_song_count();
     if (songs_count == 0 || selected_song_idx >= songs_count) {
-        current_screen = SCREEN_STATE_SONG_SELECT;
+        current_screen    = SCREEN_STATE_SONG_SELECT;
         selected_song_idx = SCREEN_INVALID_SONG_IDX;
-        song_paused = false;
+        song_paused       = false;
         screen_show_song_selection();
         return ESP_OK;
     }
