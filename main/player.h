@@ -18,4 +18,5 @@ esp_err_t player_play(size_t song_idx);
 esp_err_t player_pause(void);
 esp_err_t player_resume(void);
 esp_err_t player_clear(void);
+void player_notify_a2dp_started(void);
 int32_t player_read_pcm(uint8_t* data, int32_t len);

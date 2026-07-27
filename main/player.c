@@ -34,10 +34,7 @@
 #define PLAYER_FILE_URI_PREFIX "file://"
 #define PLAYER_MAX_FILE_URI_LEN (sizeof(PLAYER_FILE_URI_PREFIX) + SDCARD_MAX_PATH_LEN)
 #define PLAYER_PCM_STREAM_BUFFER_SIZE (32 * 1024)
-#define PLAYER_PCM_PRIME_BYTES (6 * 1024)
 #define PLAYER_PCM_WRITE_LOG_INTERVAL_BYTES (64 * 1024)
-#define PLAYER_PCM_GAIN_NUMERATOR 1
-#define PLAYER_PCM_GAIN_DENOMINATOR 8
 
 static const char* TAG = "player";
 static StreamBufferHandle_t pcm_stream;
@@ -47,12 +44,14 @@ static uint64_t pcm_total_read;
 static uint32_t pcm_bytes_per_second;
 static uint32_t pcm_total_seconds;
 static uint32_t pcm_last_progress_seconds;
-static bool pcm_media_started;
+static bool a2dp_start_requested;
+static bool playback_screen_notified;
 
 typedef enum {
     PLAYER_EVT_PLAY,
     PLAYER_EVT_PAUSE,
     PLAYER_EVT_RESUME,
+    PLAYER_EVT_A2DP_STARTED,
     PLAYER_EVT_FINISHED,
     PLAYER_EVT_CLEAR,
 } player_event_t;
@@ -81,12 +80,12 @@ static esp_err_t player_send_msg(const player_msg_t* msg);
 static void player_handle_play(const char* path);
 static void player_handle_pause(void);
 static void player_handle_resume(void);
+static void player_handle_a2dp_started(void);
 static void player_handle_finished(void);
 static void player_handle_clear(void);
 static void player_clear_pending_events(void);
 static void player_reset_pcm_state(void);
 static void player_destroy_active(void);
-static void player_apply_pcm_gain(uint8_t* data, size_t len);
 static esp_err_t player_build_file_uri(char* uri, size_t uri_size, const char* path);
 static esp_err_t player_gmf_err_to_esp_err(esp_gmf_err_t err);
 static esp_err_t player_start_file(const char* path);
@@ -111,8 +110,6 @@ static int player_simple_out_cb(uint8_t* data, int data_size, void* ctx) {
         ESP_LOGI(TAG, "First PCM output callback: %u bytes", (unsigned)data_len);
     }
 
-    player_apply_pcm_gain(data, data_len);
-
     while (written < data_len) {
         size_t sent = xStreamBufferSend(pcm_stream, data + written, data_len - written, portMAX_DELAY);
         if (sent == 0) {
@@ -126,17 +123,6 @@ static int player_simple_out_cb(uint8_t* data, int data_size, void* ctx) {
         size_t buffered = xStreamBufferBytesAvailable(pcm_stream);
         ESP_LOGI(TAG, "PCM written: %u total, buffered %u", (unsigned)pcm_total_written, (unsigned)buffered);
         pcm_next_write_log += PLAYER_PCM_WRITE_LOG_INTERVAL_BYTES;
-    }
-
-    if (!pcm_media_started) {
-        size_t buffered = xStreamBufferBytesAvailable(pcm_stream);
-        if (buffered >= PLAYER_PCM_PRIME_BYTES) {
-            ESP_LOGI(TAG, "PCM primed: %u buffered, starting A2DP media", (unsigned)buffered);
-            pcm_media_started = true;
-            screen_notify_show_song_playing();
-            screen_notify_song_progress(0, pcm_total_seconds);
-            bt_app_start_media();
-        }
     }
 
     return 0;
@@ -201,6 +187,15 @@ static int player_simple_event_cb(esp_asp_event_pkt_t* event, void* ctx) {
     esp_err_t ret = bt_app_set_audio_info(&bt_audio_info);
     if (ret != ESP_OK) {
         ESP_LOGW(TAG, "Failed to dispatch decoded audio info to BT app: %s", esp_err_to_name(ret));
+    }
+
+    if (!a2dp_start_requested) {
+        a2dp_start_requested = true;
+        ret = bt_app_start_media();
+        if (ret != ESP_OK) {
+            a2dp_start_requested = false;
+            ESP_LOGW(TAG, "Failed to request A2DP media start: %s", esp_err_to_name(ret));
+        }
     }
 
     return 0;
@@ -351,7 +346,7 @@ int32_t player_read_pcm(uint8_t* data, int32_t len) {
         memset(data + bytes_read, 0, (size_t)len - bytes_read);
     }
 
-    if (pcm_media_started && pcm_bytes_per_second > 0 && bytes_read > 0) {
+    if (a2dp_start_requested && pcm_bytes_per_second > 0 && bytes_read > 0) {
         pcm_total_read += bytes_read;
         elapsed_seconds = (uint32_t)(pcm_total_read / pcm_bytes_per_second);
         if (elapsed_seconds != pcm_last_progress_seconds) {
@@ -361,6 +356,16 @@ int32_t player_read_pcm(uint8_t* data, int32_t len) {
     }
 
     return len;
+}
+
+void player_notify_a2dp_started(void) {
+    player_msg_t msg = {
+        .event = PLAYER_EVT_A2DP_STARTED,
+    };
+
+    if (player_send_msg(&msg) != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to enqueue A2DP started event");
+    }
 }
 
 static void player_task_handler(void* arg __attribute__((unused))) {
@@ -380,6 +385,9 @@ static void player_task_handler(void* arg __attribute__((unused))) {
             break;
         case PLAYER_EVT_RESUME:
             player_handle_resume();
+            break;
+        case PLAYER_EVT_A2DP_STARTED:
+            player_handle_a2dp_started();
             break;
         case PLAYER_EVT_FINISHED:
             player_handle_finished();
@@ -458,6 +466,22 @@ static void player_handle_resume(void) {
     }
 }
 
+static void player_handle_a2dp_started(void) {
+    uint32_t elapsed_seconds = 0;
+
+    if (!a2dp_start_requested || playback_screen_notified) {
+        return;
+    }
+
+    playback_screen_notified = true;
+    if (pcm_bytes_per_second > 0) {
+        elapsed_seconds = (uint32_t)(pcm_total_read / pcm_bytes_per_second);
+    }
+
+    screen_notify_show_song_playing();
+    screen_notify_song_progress(elapsed_seconds, pcm_total_seconds);
+}
+
 static void player_handle_finished(void) {
     player_handle_clear();
     screen_notify_song_finished();
@@ -486,7 +510,8 @@ static void player_reset_pcm_state(void) {
     pcm_bytes_per_second      = 0;
     pcm_total_seconds         = 0;
     pcm_last_progress_seconds = 0;
-    pcm_media_started         = false;
+    a2dp_start_requested      = false;
+    playback_screen_notified  = false;
 }
 
 static void player_destroy_active(void) {
@@ -514,15 +539,6 @@ static uint32_t player_estimate_total_seconds(uint64_t file_size_bytes, uint32_t
     bitrate_bps = bitrate_kbps * 1000U;
     total_bits  = file_size_bytes * 8U;
     return (uint32_t)((total_bits + bitrate_bps - 1U) / bitrate_bps);
-}
-
-static void player_apply_pcm_gain(uint8_t* data, size_t len) {
-    int16_t* samples    = (int16_t*)data;
-    size_t sample_count = len / sizeof(int16_t);
-
-    for (size_t i = 0; i < sample_count; i++) {
-        samples[i] = (int16_t)(((int32_t)samples[i] * PLAYER_PCM_GAIN_NUMERATOR) / PLAYER_PCM_GAIN_DENOMINATOR);
-    }
 }
 
 static esp_err_t player_build_file_uri(char* uri, size_t uri_size, const char* path) {

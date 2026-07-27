@@ -60,6 +60,7 @@ static void bt_av_notify_evt_handler(uint8_t event_id, esp_avrc_rn_param_t* even
 }
 
 static void bt_av_volume_change_hdlr(uint16_t event, void* p_param) {
+    esp_err_t ret;
     int8_t delta;
     int next_volume;
 
@@ -79,7 +80,8 @@ static void bt_av_volume_change_hdlr(uint16_t event, void* p_param) {
 
     s_volume = (uint8_t)next_volume;
     ESP_LOGI(BT_RC_CT_TAG, "Set absolute volume: volume %d", s_volume);
-    esp_avrc_ct_send_set_absolute_volume_cmd(APP_RC_CT_TL_SET_VOLUME, s_volume);
+    ret = esp_avrc_ct_send_set_absolute_volume_cmd(APP_RC_CT_TL_SET_VOLUME, s_volume);
+    ESP_LOGI(BT_RC_CT_TAG, "Set absolute volume command result: %s (0x%x)", esp_err_to_name(ret), ret);
 }
 
 esp_err_t bt_app_volume_up(void) {

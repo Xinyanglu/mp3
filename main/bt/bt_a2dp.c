@@ -81,8 +81,16 @@ void bt_app_a2d_heart_beat(TimerHandle_t arg) {
     bt_app_work_dispatch(bt_app_av_sm_hdlr, BT_APP_HEART_BEAT_EVT, NULL, 0, NULL);
 }
 
-void bt_app_start_media(void) {
-    bt_app_work_dispatch(bt_app_av_sm_hdlr, BT_APP_MEDIA_START_EVT, NULL, 0, NULL);
+esp_err_t bt_app_start_media(void) {
+    return bt_app_work_dispatch(bt_app_av_sm_hdlr, BT_APP_MEDIA_START_EVT, NULL, 0, NULL) ? ESP_OK : ESP_FAIL;
+}
+
+esp_err_t bt_app_suspend_media(void) {
+    return bt_app_work_dispatch(bt_app_av_sm_hdlr, BT_APP_MEDIA_SUSPEND_EVT, NULL, 0, NULL) ? ESP_OK : ESP_FAIL;
+}
+
+esp_err_t bt_app_disconnect(void) {
+    return bt_app_work_dispatch(bt_app_av_sm_hdlr, BT_APP_DISCONNECT_EVT, NULL, 0, NULL) ? ESP_OK : ESP_FAIL;
 }
 
 esp_err_t bt_app_set_audio_info(const bt_app_audio_info_t* info) {
@@ -143,8 +151,16 @@ static const char* bt_app_av_event_to_str(uint16_t event) {
         return "BT_APP_MEDIA_START_EVT";
     }
 
+    if (event == BT_APP_MEDIA_SUSPEND_EVT) {
+        return "BT_APP_MEDIA_SUSPEND_EVT";
+    }
+
     if (event == BT_APP_AUDIO_INFO_EVT) {
         return "BT_APP_AUDIO_INFO_EVT";
+    }
+
+    if (event == BT_APP_DISCONNECT_EVT) {
+        return "BT_APP_DISCONNECT_EVT";
     }
 
     if (event == BT_APP_HEART_BEAT_EVT) {
@@ -371,6 +387,7 @@ static void bt_app_av_state_unconnected_hdlr(uint16_t event, void* param) {
     case ESP_A2D_AUDIO_CFG_EVT:
     case ESP_A2D_MEDIA_CTRL_ACK_EVT:
     case BT_APP_MEDIA_START_EVT:
+    case BT_APP_MEDIA_SUSPEND_EVT:
     case BT_APP_AUDIO_INFO_EVT:
         break;
     case BT_APP_HEART_BEAT_EVT: {
@@ -419,6 +436,7 @@ static void bt_app_av_state_connecting_hdlr(uint16_t event, void* param) {
     case ESP_A2D_AUDIO_CFG_EVT:
     case ESP_A2D_MEDIA_CTRL_ACK_EVT:
     case BT_APP_MEDIA_START_EVT:
+    case BT_APP_MEDIA_SUSPEND_EVT:
     case BT_APP_AUDIO_INFO_EVT:
         break;
     case BT_APP_HEART_BEAT_EVT:
@@ -441,49 +459,97 @@ static void bt_app_av_state_connecting_hdlr(uint16_t event, void* param) {
 static void bt_app_av_media_proc(uint16_t event, void* param) {
     bt_log_enter(__func__);
     esp_a2d_cb_param_t* a2d = NULL;
+    esp_err_t ret;
 
     switch (s_media_state) {
     case APP_AV_MEDIA_STATE_IDLE:
         if (event == BT_APP_MEDIA_START_EVT) {
             ESP_LOGI(BT_AV_TAG, "a2dp media ready checking ...");
-            esp_a2d_media_ctrl(ESP_A2D_MEDIA_CTRL_CHECK_SRC_RDY);
+            ret = esp_a2d_media_ctrl(ESP_A2D_MEDIA_CTRL_CHECK_SRC_RDY);
+            if (ret == ESP_OK) {
+                s_media_state = APP_AV_MEDIA_STATE_CHECKING;
+            } else {
+                ESP_LOGW(BT_AV_TAG, "Failed to check A2DP media readiness: %s", esp_err_to_name(ret));
+            }
+        }
+        break;
+    case APP_AV_MEDIA_STATE_CHECKING:
+        if (event == BT_APP_MEDIA_SUSPEND_EVT) {
+            s_media_state = APP_AV_MEDIA_STATE_IDLE;
         } else if (event == ESP_A2D_MEDIA_CTRL_ACK_EVT) {
             a2d = (esp_a2d_cb_param_t*)(param);
             if (a2d->media_ctrl_stat.cmd == ESP_A2D_MEDIA_CTRL_CHECK_SRC_RDY &&
                 a2d->media_ctrl_stat.status == ESP_A2D_MEDIA_CTRL_ACK_SUCCESS) {
                 ESP_LOGI(BT_AV_TAG, "a2dp media ready, starting ...");
-                esp_a2d_media_ctrl(ESP_A2D_MEDIA_CTRL_START);
-                s_media_state = APP_AV_MEDIA_STATE_STARTING;
+                ret = esp_a2d_media_ctrl(ESP_A2D_MEDIA_CTRL_START);
+                if (ret == ESP_OK) {
+                    s_media_state = APP_AV_MEDIA_STATE_STARTING;
+                } else {
+                    ESP_LOGW(BT_AV_TAG, "Failed to start A2DP media: %s", esp_err_to_name(ret));
+                    s_media_state = APP_AV_MEDIA_STATE_IDLE;
+                }
+            } else if (a2d->media_ctrl_stat.cmd == ESP_A2D_MEDIA_CTRL_CHECK_SRC_RDY) {
+                ESP_LOGW(BT_AV_TAG, "A2DP media is not ready");
+                s_media_state = APP_AV_MEDIA_STATE_IDLE;
             }
         }
         break;
     case APP_AV_MEDIA_STATE_STARTING:
         if (event == ESP_A2D_MEDIA_CTRL_ACK_EVT) {
             a2d = (esp_a2d_cb_param_t*)(param);
-            if (a2d->media_ctrl_stat.cmd == ESP_A2D_MEDIA_CTRL_START &&
-                a2d->media_ctrl_stat.status == ESP_A2D_MEDIA_CTRL_ACK_SUCCESS) {
-                ESP_LOGI(BT_AV_TAG, "a2dp media start successfully.");
-                s_media_state = APP_AV_MEDIA_STATE_STARTED;
-            } else {
-                ESP_LOGI(BT_AV_TAG, "a2dp media start failed.");
-                s_media_state = APP_AV_MEDIA_STATE_IDLE;
+            if (a2d->media_ctrl_stat.cmd == ESP_A2D_MEDIA_CTRL_START) {
+                if (a2d->media_ctrl_stat.status == ESP_A2D_MEDIA_CTRL_ACK_SUCCESS) {
+                    ESP_LOGI(BT_AV_TAG, "a2dp media start successfully.");
+                    s_media_state = APP_AV_MEDIA_STATE_STARTED;
+                    player_notify_a2dp_started();
+                } else {
+                    ESP_LOGW(BT_AV_TAG, "a2dp media start failed.");
+                    s_media_state = APP_AV_MEDIA_STATE_IDLE;
+                }
             }
         }
         break;
     case APP_AV_MEDIA_STATE_STARTED:
+        if (event == BT_APP_MEDIA_START_EVT) {
+            ESP_LOGI(BT_AV_TAG, "a2dp media already started.");
+            player_notify_a2dp_started();
+        } else if (event == BT_APP_MEDIA_SUSPEND_EVT) {
+            ESP_LOGI(BT_AV_TAG, "a2dp media suspending...");
+            ret = esp_a2d_media_ctrl(ESP_A2D_MEDIA_CTRL_SUSPEND);
+            if (ret == ESP_OK) {
+                s_media_state = APP_AV_MEDIA_STATE_SUSPENDING;
+            } else {
+                ESP_LOGW(BT_AV_TAG, "Failed to suspend A2DP media: %s", esp_err_to_name(ret));
+            }
+        }
+        break;
+    case APP_AV_MEDIA_STATE_SUSPENDING:
+        if (event == ESP_A2D_MEDIA_CTRL_ACK_EVT) {
+            a2d = (esp_a2d_cb_param_t*)(param);
+            if (a2d->media_ctrl_stat.cmd == ESP_A2D_MEDIA_CTRL_SUSPEND) {
+                if (a2d->media_ctrl_stat.status == ESP_A2D_MEDIA_CTRL_ACK_SUCCESS) {
+                    ESP_LOGI(BT_AV_TAG, "a2dp media suspend successfully.");
+                    s_media_state = APP_AV_MEDIA_STATE_IDLE;
+                } else {
+                    ESP_LOGW(BT_AV_TAG, "a2dp media suspend failed.");
+                    s_media_state = APP_AV_MEDIA_STATE_STARTED;
+                }
+            }
+        }
         break;
     case APP_AV_MEDIA_STATE_STOPPING:
         if (event == ESP_A2D_MEDIA_CTRL_ACK_EVT) {
             a2d = (esp_a2d_cb_param_t*)(param);
-            if (a2d->media_ctrl_stat.cmd == ESP_A2D_MEDIA_CTRL_SUSPEND &&
-                a2d->media_ctrl_stat.status == ESP_A2D_MEDIA_CTRL_ACK_SUCCESS) {
-                ESP_LOGI(BT_AV_TAG, "a2dp media suspend successfully, disconnecting...");
-                s_media_state = APP_AV_MEDIA_STATE_IDLE;
-                esp_a2d_source_disconnect(s_peer_bda);
-                s_a2d_state = APP_AV_STATE_DISCONNECTING;
-            } else {
-                ESP_LOGI(BT_AV_TAG, "a2dp media suspending...");
-                esp_a2d_media_ctrl(ESP_A2D_MEDIA_CTRL_SUSPEND);
+            if (a2d->media_ctrl_stat.cmd == ESP_A2D_MEDIA_CTRL_SUSPEND) {
+                if (a2d->media_ctrl_stat.status == ESP_A2D_MEDIA_CTRL_ACK_SUCCESS) {
+                    ESP_LOGI(BT_AV_TAG, "a2dp media suspend successfully, disconnecting...");
+                    s_media_state = APP_AV_MEDIA_STATE_IDLE;
+                    esp_a2d_source_disconnect(s_peer_bda);
+                    s_a2d_state = APP_AV_STATE_DISCONNECTING;
+                } else {
+                    ESP_LOGI(BT_AV_TAG, "a2dp media suspending...");
+                    esp_a2d_media_ctrl(ESP_A2D_MEDIA_CTRL_SUSPEND);
+                }
             }
         }
         break;
@@ -514,11 +580,37 @@ static void bt_app_av_state_connected_hdlr(uint16_t event, void* param) {
         break;
     case ESP_A2D_MEDIA_CTRL_ACK_EVT:
     case BT_APP_MEDIA_START_EVT:
+    case BT_APP_MEDIA_SUSPEND_EVT:
         bt_app_av_media_proc(event, param);
         break;
     case BT_APP_AUDIO_INFO_EVT:
         bt_app_a2d_store_audio_info((const bt_app_audio_info_t*)param);
         break;
+    case BT_APP_DISCONNECT_EVT: {
+        esp_err_t ret;
+
+        if (s_media_state == APP_AV_MEDIA_STATE_STOPPING) {
+            break;
+        }
+
+        if (s_media_state == APP_AV_MEDIA_STATE_STARTED) {
+            ret = esp_a2d_media_ctrl(ESP_A2D_MEDIA_CTRL_SUSPEND);
+            if (ret == ESP_OK) {
+                s_media_state = APP_AV_MEDIA_STATE_STOPPING;
+                break;
+            }
+            ESP_LOGW(BT_AV_TAG, "Failed to suspend media before disconnect: %s", esp_err_to_name(ret));
+        }
+
+        ret = esp_a2d_source_disconnect(s_peer_bda);
+        if (ret == ESP_OK) {
+            s_media_state = APP_AV_MEDIA_STATE_IDLE;
+            s_a2d_state   = APP_AV_STATE_DISCONNECTING;
+        } else {
+            ESP_LOGW(BT_AV_TAG, "Failed to disconnect A2DP source: %s", esp_err_to_name(ret));
+        }
+        break;
+    }
     case BT_APP_HEART_BEAT_EVT:
         break;
     case ESP_A2D_REPORT_SNK_DELAY_VALUE_EVT:
@@ -571,6 +663,7 @@ static void bt_app_av_state_disconnecting_hdlr(uint16_t event, void* param) {
     case ESP_A2D_AUDIO_CFG_EVT:
     case ESP_A2D_MEDIA_CTRL_ACK_EVT:
     case BT_APP_MEDIA_START_EVT:
+    case BT_APP_MEDIA_SUSPEND_EVT:
     case BT_APP_HEART_BEAT_EVT:
     case BT_APP_AUDIO_INFO_EVT:
         break;
