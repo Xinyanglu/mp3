@@ -52,6 +52,7 @@ static void screen_show_song_loading(void);
 static void screen_show_song_playing(void);
 static void screen_update_song_progress(uint32_t elapsed_seconds, uint32_t total_seconds);
 static esp_err_t screen_play_selected_song(void);
+static esp_err_t screen_play_previous_song(void);
 static esp_err_t screen_play_next_song(void);
 static void screen_load_song_page(size_t page_index, size_t selected_idx);
 
@@ -412,6 +413,10 @@ static esp_err_t screen_handle_song_playing_btn_press(screen_button button) {
         ESP_RETURN_ON_ERROR(bt_app_volume_up(), TAG, "Failed to raise volume");
     } else if (button == SCREEN_BTN_DOWN) {
         ESP_RETURN_ON_ERROR(bt_app_volume_down(), TAG, "Failed to lower volume");
+    } else if (button == SCREEN_BTN_LEFT) {
+        ESP_RETURN_ON_ERROR(screen_play_previous_song(), TAG, "Failed to play previous song");
+    } else if (button == SCREEN_BTN_RIGHT) {
+        ESP_RETURN_ON_ERROR(screen_play_next_song(), TAG, "Failed to play next song");
     } else if (button == SCREEN_BTN_SELECT_LONG) {
         if (!song_paused) {
             ESP_RETURN_ON_ERROR(player_pause(), TAG, "Failed to pause playback");
@@ -467,6 +472,39 @@ static esp_err_t screen_play_selected_song(void) {
     song_paused    = false;
     screen_show_song_loading();
     return player_play(selected_song_idx);
+}
+
+static esp_err_t screen_play_previous_song(void) {
+    size_t songs_count = sdcard_get_song_count();
+
+    if (songs_count == 0) {
+        current_screen    = SCREEN_STATE_SONG_SELECT;
+        selected_song_idx = SCREEN_INVALID_SONG_IDX;
+        song_paused       = false;
+        screen_show_song_selection();
+        return ESP_OK;
+    }
+
+    if (selected_song_idx >= songs_count) {
+        selected_song_idx = 0;
+    } else if (selected_song_idx > 0) {
+        selected_song_idx--;
+    } else if (sdcard_has_prev_page()) {
+        screen_load_song_page(sdcard_get_song_page() - 1, SDCARD_MAX_SONGS - 1);
+    } else {
+        screen_load_song_page(sdcard_get_total_song_pages() - 1, SDCARD_MAX_SONGS - 1);
+    }
+
+    songs_count = sdcard_get_song_count();
+    if (songs_count == 0 || selected_song_idx >= songs_count) {
+        current_screen    = SCREEN_STATE_SONG_SELECT;
+        selected_song_idx = SCREEN_INVALID_SONG_IDX;
+        song_paused       = false;
+        screen_show_song_selection();
+        return ESP_OK;
+    }
+
+    return screen_play_selected_song();
 }
 
 static esp_err_t screen_play_next_song(void) {

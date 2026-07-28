@@ -30,7 +30,7 @@ static TaskHandle_t buttons_task_handle      = NULL;
 static TimerHandle_t select_debounce_timer   = NULL;
 static TimerHandle_t select_long_press_timer = NULL;
 static TickType_t last_button_isr_ticks[SCREEN_BTN_MAX];
-static bool select_pressed;
+static bool was_pressed;
 static bool select_long_press_sent;
 
 typedef struct {
@@ -49,14 +49,14 @@ static void enqueue_button_event(screen_button event) {
 
 static void select_debounce_timer_cb(TimerHandle_t timer) {
     (void)timer;
-    bool pressed = gpio_get_level(BUTTON_SELECT) == 0;
+    bool is_pressed_now = gpio_get_level(BUTTON_SELECT) == 0;
 
-    if (pressed == select_pressed) {
+    if (is_pressed_now == was_pressed) {
         return;
     }
 
-    select_pressed = pressed;
-    if (pressed) {
+    was_pressed = is_pressed_now;
+    if (is_pressed_now) {
         select_long_press_sent = false;
         if (xTimerReset(select_long_press_timer, 0) != pdPASS) {
             ESP_LOGW(TAG, "Failed to start Select long-press timer");
@@ -73,7 +73,7 @@ static void select_debounce_timer_cb(TimerHandle_t timer) {
 static void select_long_press_timer_cb(TimerHandle_t timer) {
     (void)timer;
 
-    if (!select_pressed || gpio_get_level(BUTTON_SELECT) != 0) {
+    if (!was_pressed || gpio_get_level(BUTTON_SELECT) != 0) {
         return;
     }
 
@@ -90,9 +90,7 @@ static void IRAM_ATTR button_select_isr_handler(void* arg) {
     }
 
     if (event == SCREEN_BTN_SELECT) {
-        if (select_debounce_timer != NULL) {
-            xTimerResetFromISR(select_debounce_timer, &higher_priority_task_woken);
-        }
+        xTimerResetFromISR(select_debounce_timer, &higher_priority_task_woken);
         if (higher_priority_task_woken == pdTRUE) {
             portYIELD_FROM_ISR();
         }
@@ -163,7 +161,7 @@ esp_err_t buttons_init(void) {
         .intr_type    = GPIO_INTR_NEGEDGE,
     };
 
-    ESP_RETURN_ON_ERROR(gpio_config(&button_config), TAG, "Select button GPIO config failed");
+    ESP_RETURN_ON_ERROR(gpio_config(&button_config), TAG, "Button GPIO config failed");
     ESP_RETURN_ON_ERROR(gpio_set_intr_type(BUTTON_SELECT, GPIO_INTR_ANYEDGE), TAG, "Select button interrupt config failed");
 
     esp_err_t ret = gpio_install_isr_service(0);
