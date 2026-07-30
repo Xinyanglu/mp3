@@ -45,7 +45,6 @@ static uint32_t pcm_bytes_per_second;
 static uint32_t pcm_total_seconds;
 static uint32_t pcm_last_progress_seconds;
 static bool a2dp_start_requested;
-static bool playback_screen_notified;
 
 typedef enum {
     PLAYER_EVT_PLAY,
@@ -79,7 +78,7 @@ static void player_task_handler(void* arg);
 static esp_err_t player_send_msg(const player_msg_t* msg);
 static void player_handle_play(const char* path);
 static void player_handle_pause(void);
-static void player_handle_resume(void);
+static esp_err_t player_handle_resume(void);
 static void player_handle_a2dp_started(void);
 static void player_handle_finished(void);
 static void player_handle_clear(void);
@@ -417,10 +416,29 @@ static esp_err_t player_send_msg(const player_msg_t* msg) {
 
 static void player_handle_play(const char* path) {
     char play_path[SDCARD_MAX_PATH_LEN];
+    esp_asp_state_t state;
+    esp_gmf_err_t gmf_ret;
     esp_err_t ret;
 
     if (path == NULL || path[0] == '\0') {
         return;
+    }
+
+    if (active_simple_player != NULL && strcmp(path, active_song_path) == 0) {
+        gmf_ret = esp_audio_simple_player_get_state(active_simple_player, &state);
+        if (gmf_ret == ESP_GMF_ERR_OK && state == ESP_ASP_STATE_PAUSED) {
+            ESP_LOGI(TAG, "Resuming song: %s", active_song_path);
+            ret = player_handle_resume();
+            if (ret != ESP_OK) {
+                return;
+            }
+
+            ret = bt_app_start_media();
+            if (ret != ESP_OK) {
+                ESP_LOGW(TAG, "Failed to request A2DP media resume: %s", esp_err_to_name(ret));
+            }
+            return;
+        }
     }
 
     strlcpy(play_path, path, sizeof(play_path));
@@ -452,28 +470,31 @@ static void player_handle_pause(void) {
     }
 }
 
-static void player_handle_resume(void) {
+static esp_err_t player_handle_resume(void) {
     esp_gmf_err_t gmf_ret;
 
     if (active_simple_player == NULL) {
         ESP_LOGW(TAG, "Cannot resume; no active player");
-        return;
+        return ESP_ERR_INVALID_STATE;
     }
 
     gmf_ret = esp_audio_simple_player_resume(active_simple_player);
     if (gmf_ret != ESP_GMF_ERR_OK) {
-        ESP_LOGW(TAG, "Failed to resume player: %s", esp_err_to_name(player_gmf_err_to_esp_err(gmf_ret)));
+        esp_err_t ret = player_gmf_err_to_esp_err(gmf_ret);
+        ESP_LOGW(TAG, "Failed to resume player: %s", esp_err_to_name(ret));
+        return ret;
     }
+
+    return ESP_OK;
 }
 
 static void player_handle_a2dp_started(void) {
     uint32_t elapsed_seconds = 0;
 
-    if (!a2dp_start_requested || playback_screen_notified) {
+    if (!a2dp_start_requested) {
         return;
     }
 
-    playback_screen_notified = true;
     if (pcm_bytes_per_second > 0) {
         elapsed_seconds = (uint32_t)(pcm_total_read / pcm_bytes_per_second);
     }
@@ -511,7 +532,6 @@ static void player_reset_pcm_state(void) {
     pcm_total_seconds         = 0;
     pcm_last_progress_seconds = 0;
     a2dp_start_requested      = false;
-    playback_screen_notified  = false;
 }
 
 static void player_destroy_active(void) {

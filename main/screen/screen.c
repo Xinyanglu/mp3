@@ -95,9 +95,11 @@ static void screen_task_handler(void* arg __attribute__((unused))) {
                 break;
 
             case SCREEN_EVT_SONG_PLAYING:
-                current_screen = SCREEN_STATE_SONG_PLAYING;
-                song_paused    = false;
-                screen_show_song_playing();
+                if (current_screen == SCREEN_STATE_SONG_LOADING) {
+                    current_screen = SCREEN_STATE_SONG_PLAYING;
+                    song_paused    = false;
+                    screen_show_song_playing();
+                }
                 break;
 
             case SCREEN_EVT_SONG_PROGRESS:
