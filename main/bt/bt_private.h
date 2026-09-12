@@ -57,9 +57,7 @@ extern esp_bd_addr_t s_peer_bda;
 extern char s_peer_bdname[ESP_BT_GAP_MAX_BDNAME_LEN + 1];
 extern int s_a2d_state;
 extern int s_media_state;
-extern int s_intv_cnt;
 extern int s_connecting_intv;
-extern uint32_t s_pkt_cnt;
 extern esp_avrc_rn_evt_cap_mask_t s_avrc_peer_rn_cap;
 extern TimerHandle_t s_heartbeat_timer;
 

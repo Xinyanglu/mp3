@@ -235,8 +235,6 @@ esp_err_t player_play(size_t song_idx) {
         .event = PLAYER_EVT_PLAY,
     };
 
-    ESP_RETURN_ON_FALSE(player_queue != NULL, ESP_ERR_INVALID_STATE, TAG, "Player queue not initialized");
-
     ESP_RETURN_ON_ERROR(sdcard_get_song_path(song_idx, msg.path, sizeof(msg.path)), TAG, "Invalid song path");
 
     return player_send_msg(&msg);
@@ -247,8 +245,6 @@ esp_err_t player_pause(void) {
         .event = PLAYER_EVT_PAUSE,
     };
 
-    ESP_RETURN_ON_FALSE(player_queue != NULL, ESP_ERR_INVALID_STATE, TAG, "Player queue not initialized");
-
     return player_send_msg(&msg);
 }
 
@@ -257,8 +253,6 @@ esp_err_t player_resume(void) {
         .event = PLAYER_EVT_RESUME,
     };
 
-    ESP_RETURN_ON_FALSE(player_queue != NULL, ESP_ERR_INVALID_STATE, TAG, "Player queue not initialized");
-
     return player_send_msg(&msg);
 }
 
@@ -266,8 +260,6 @@ esp_err_t player_clear(void) {
     player_msg_t msg = {
         .event = PLAYER_EVT_CLEAR,
     };
-
-    ESP_RETURN_ON_FALSE(player_queue != NULL, ESP_ERR_INVALID_STATE, TAG, "Player queue not initialized");
 
     return player_send_msg(&msg);
 }
@@ -318,8 +310,8 @@ static esp_err_t player_start_file(const char* path) {
     if (gmf_ret != ESP_GMF_ERR_OK) {
         ret         = player_gmf_err_to_esp_err(gmf_ret);
         destroy_ret = esp_audio_simple_player_destroy(simple_player);
-        if (ret == ESP_OK && destroy_ret != ESP_GMF_ERR_OK) {
-            ret = player_gmf_err_to_esp_err(destroy_ret);
+        if (destroy_ret != ESP_GMF_ERR_OK) {
+            ESP_LOGW(TAG, "Failed to destroy simple player");
         }
         return ret;
     }

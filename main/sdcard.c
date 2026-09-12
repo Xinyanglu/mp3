@@ -42,7 +42,6 @@ static size_t song_count;
 static size_t total_song_count;
 static size_t song_page;
 static size_t total_song_pages;
-static bool song_page_has_next;
 static sdmmc_card_t* sd_card;
 static bool sdcard_mounted;
 static bool sdcard_initialized;
@@ -145,7 +144,6 @@ esp_err_t sdcard_load_song_page(size_t page_index) {
     page_end           = page_start + SDCARD_MAX_SONGS;
     song_count         = 0;
     song_page          = page_index;
-    song_page_has_next = page_index + 1 < total_song_pages;
 
     dir = opendir(ROOT_PATH);
     if (dir == NULL) {
@@ -178,7 +176,7 @@ esp_err_t sdcard_load_song_page(size_t page_index) {
              (unsigned int)total_song_pages,
              (unsigned int)song_count,
              (unsigned int)total_song_count,
-             song_page_has_next ? "true" : "false");
+             sdcard_has_next_page() ? "true" : "false");
     return ESP_OK;
 }
 
@@ -203,7 +201,7 @@ bool sdcard_has_prev_page(void) {
 }
 
 bool sdcard_has_next_page(void) {
-    return song_page_has_next;
+    return total_song_pages > 0 && song_page < total_song_pages - 1;
 }
 
 const sdcard_song_t* sdcard_get_song(size_t index) {

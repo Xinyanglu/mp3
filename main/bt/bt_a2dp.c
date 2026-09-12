@@ -572,9 +572,6 @@ static void bt_app_av_state_connected_hdlr(uint16_t event, void* param) {
         break;
     case ESP_A2D_AUDIO_STATE_EVT:
         a2d = (esp_a2d_cb_param_t*)(param);
-        if (ESP_A2D_AUDIO_STATE_STARTED == a2d->audio_stat.state) {
-            s_pkt_cnt = 0;
-        }
         break;
     case ESP_A2D_AUDIO_CFG_EVT:
         break;
